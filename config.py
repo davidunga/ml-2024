@@ -12,6 +12,7 @@ _config = {
         'gender': ['Unknown/Invalid'],
     },
     'data.bias_thresh': 0.95,
+    'data.readmitted_groups': {'YES': ['<30'], 'NO': ['>30', 'NO']},
     'data.recategorize': {
         'age': {
             '<30': ['[0-10)', '[10-20)', '[20-30)'],
@@ -28,10 +29,6 @@ _config = {
         },
         'discharge_disposition_id': {
             'Home': [1]
-        },
-        'readmitted': {
-            'YES': ['<30'],
-            'NO': ['>30', 'NO']
         }
     }
 }

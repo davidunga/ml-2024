@@ -1,6 +1,6 @@
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
-from data import load_data, make_data_transformer
+from data import load_data, make_data_init_pipe, make_feature_prep_pipe
 from config import get_config
 
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
@@ -19,15 +19,24 @@ GRID = [
 
 def run_crossval(config: dict, grid: list):
 
-    featuers_df, target_df = load_data(config)
-    data_transformer = make_data_transformer(config, featuers_df)
+    # we use two pipelines:
+    # data_init_pipe is used for data initialization; it removes some of the rows, processes the target
+    #   variable, and separates the features from the target.
+    # feature_prep_pipe is a 'regular' preprocessing pipe: it operates only on X (features)
+    #   and is not allowed to remove rows or operate on the target variable
+
+    df = load_data(config)
+    data_init_pipe = make_data_init_pipe(config)
+    feature_prep_pipe = make_feature_prep_pipe(config)
+
+    features_df, target_df = data_init_pipe.fit_transform(df)
 
     for model_type, params in grid:
         for seed in range(config['cv.n_seeds']):
             model = model_type(random_state=seed)
             grid_search = GridSearchCV(model, params, cv=config['cv.n_folds'], scoring=config['cv.score'], verbose=2)
-            pipe = Pipeline(steps=[("data_transformer", data_transformer), ("grid_search", grid_search)])
-            pipe.fit(featuers_df, target_df)
+            pipe = Pipeline(steps=[("data_prep", feature_prep_pipe), ("grid_search", grid_search)])
+            pipe.fit(features_df, target_df)
 
 
 if __name__ == "__main__":
