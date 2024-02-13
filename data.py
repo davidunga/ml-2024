@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from data_transformers import ColumnTypeSetter, FeatureRemoverByBias, FeatureRemoverByName, \
     RowRemoverByFeatureValue, CategoryReducer, XySplitter, ICDConverter, OneHotConverter
 
@@ -17,7 +17,7 @@ def make_data_init_pipe(config: dict) -> Pipeline:
     for col, exclude_vals in config['data.exclude_rows_where'].items():
         steps.append(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
     steps.append(CategoryReducer(feature='readmitted', lookup=config['data.readmitted_groups']))
-    steps.append(XySplitter('readmitted'))
+    steps.append(XySplitter(target_col='readmitted', encode_target=True))
     return Pipeline(steps=[(step.name, step) for step in steps])
 
 

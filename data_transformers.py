@@ -3,7 +3,7 @@ import numpy as np
 from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
@@ -88,16 +88,22 @@ class ColumnTypeSetter(BaseEstimator, TransformerMixin):
 
 
 class XySplitter(BaseEstimator, TransformerMixin):
-    def __init__(self, target_col: str):
+    def __init__(self, target_col: str, encode_target: bool = True):
         self.name = "XySplitter"
         self.target_col = target_col
+        self.encode_target = encode_target
+        self._label_encoder = LabelEncoder()
 
     def fit(self, X, y=None):
+        if self.encode_target:
+            self._label_encoder.fit(X[self.target_col])
         return self
 
     def transform(self, X):
         y = X[self.target_col]
         X = X.drop(self.target_col, axis=1)
+        if self.encode_target:
+            y = self._label_encoder.transform(y)
         return X, y
 
 
@@ -107,7 +113,7 @@ class ICDConverter(BaseEstimator, TransformerMixin):
         1: range(0, 140), 2: range(140, 240), 3: range(240, 280), 4: range(280, 290), 5: range(290, 320),
         6: range(320, 390), 7: range(390, 460), 8: range(460, 520), 9: range(520, 580), 10: range(580, 630),
         11: range(630, 680), 12: range(680, 710), 13: range(710, 740), 14: range(740, 760),
-        15: range(760, 780), 16: range(780, 800), 17: range(800, 1000), 18: 'E', 19: 'V'
+        15: range(760, 780), 16: range(780, 800), 17: range(800, 1000), 18: ['E'], 19: ['V'], 0: ['nan']
     }
 
     def __init__(self, features: list):
@@ -118,8 +124,8 @@ class ICDConverter(BaseEstimator, TransformerMixin):
     def _convert_value(self, value):
         if not isinstance(value, str):
             assert np.isnan(value)
-            return value
-        if value[0] in ('E', 'V'):
+            normalized_value = 'nan'
+        elif value[0] in ('E', 'V'):
             normalized_value = value[0]
         else:
             normalized_value = int(value.split('.')[0])
@@ -146,7 +152,7 @@ class OneHotConverter(BaseEstimator, TransformerMixin):
             X = X[0]
         features = list(X.select_dtypes('category').columns)
         self._transformer = ColumnTransformer(transformers=[
-            (self.name, Pipeline(steps=[(self.name, OneHotEncoder(handle_unknown="ignore"))]), features)])
+            (self.name, Pipeline(steps=[(self.name, OneHotEncoder(handle_unknown="error"))]), features)])
         self._transformer.fit(X)
         return self
 
