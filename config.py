@@ -1,10 +1,12 @@
 from copy import deepcopy
+from hashlib import md5
+import json
 
 _config = {
 
     'cv.n_seeds': 5,
     'cv.n_folds': 5,
-    'cv.score': 'balanced_accuracy',
+    'cv.scores': ['balanced_accuracy', 'roc_auc'],
 
     'data.exclude_cols': ['weight', 'payer_code', 'encounter_id', 'patient_nbr'],
     'data.exclude_rows_where': {
@@ -37,3 +39,8 @@ _config = {
 def get_config() -> dict:
     return deepcopy(_config)
 
+
+def get_config_id(config: dict) -> str:
+    id_size = 6
+    config_str = json.dumps(config)
+    return md5(config_str.encode()).hexdigest()[:id_size]
