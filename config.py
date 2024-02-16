@@ -4,6 +4,8 @@ import json
 
 _config = {
 
+    'data.sanity_mode': 'none',
+
     'cv.n_seeds': 5,
     'cv.n_folds': 5,
     'cv.scores': ['balanced_accuracy', 'roc_auc'],

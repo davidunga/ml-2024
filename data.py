@@ -17,7 +17,7 @@ def make_data_init_pipe(config: dict) -> Pipeline:
     for col, exclude_vals in config['data.exclude_rows_where'].items():
         steps.append(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
     steps.append(CategoryReducer(feature='readmitted', lookup=config['data.readmitted_groups']))
-    steps.append(XySplitter(target_col='readmitted', encode_target=True))
+    steps.append(XySplitter(target_col='readmitted', encode_target=True, sanity_mode=config['data.sanity_mode']))
     return Pipeline(steps=[(step.name, step) for step in steps])
 
 

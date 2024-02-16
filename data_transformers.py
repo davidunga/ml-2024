@@ -88,10 +88,12 @@ class ColumnTypeSetter(BaseEstimator, TransformerMixin):
 
 
 class XySplitter(BaseEstimator, TransformerMixin):
-    def __init__(self, target_col: str, encode_target: bool = True):
+    def __init__(self, target_col: str, encode_target: bool = True, sanity_mode: str = 'none'):
+        assert sanity_mode in ('none', 'must_fail', 'must_succeed')
         self.name = "XySplitter"
         self.target_col = target_col
         self.encode_target = encode_target
+        self.sanity_mode = sanity_mode
         self._label_encoder = LabelEncoder()
 
     def fit(self, X, y=None):
@@ -101,7 +103,16 @@ class XySplitter(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         y = X[self.target_col]
-        X = X.drop(self.target_col, axis=1)
+
+        if self.sanity_mode == 'must_succeed':
+            print("! sanity_mode=", self.sanity_mode, "-> Features contain target labels.")
+        else:
+            X = X.drop(self.target_col, axis=1)
+
+        if self.sanity_mode == 'must_fail':
+            y = np.random.default_rng(0).permutation(y)
+            print("! sanity_mode=", self.sanity_mode, "-> Shuffled target labels.")
+
         if self.encode_target:
             y = self._label_encoder.transform(y)
         return X, y
