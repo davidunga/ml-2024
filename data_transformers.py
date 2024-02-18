@@ -8,7 +8,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 
 class FeatureRemoverByName(BaseEstimator, TransformerMixin):
-
+    '''Drops features based on feature list'''
     def __init__(self, features_to_remove: list):
         self.name = "FeatureRemoverByName"
         self.features_to_remove = features_to_remove
@@ -18,6 +18,43 @@ class FeatureRemoverByName(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         return X.drop(columns=self.features_to_remove, inplace=False)
+
+class RowRemoverByFeatureValue(BaseEstimator, TransformerMixin):
+    '''Drops rows based on values list in a feature'''
+    def __init__(self, feature: str, exclude_vals: list):
+        self.name = f"RowRemoverByFeatureValue {feature}"
+        self.feature = feature
+        self.exclude_vals = exclude_vals
+        self.rows_to_drop = []
+
+    def fit(self, X, y=None):
+        self.rows_to_drop = X.loc[X[self.feature].isin(self.exclude_vals)].index
+        return self
+
+    def transform(self, X):
+        return X.drop(index=self.rows_to_drop).reset_index(drop=True)
+
+
+class GroupFeatureValuesByDict(BaseEstimator, TransformerMixin):
+    '''group multiple values inside a feature using dict: {new_value: [list_of_old_values]}
+        all values that are not defined in the group_dict will return as other '''
+    def __init__(self, feature: str, group_dict: dict):
+        self.name = f"GroupFeatureValuesByDict {feature}"
+        self.frature = feature
+        self.group_dict = group_dict
+
+    def fit(self, X):
+        return self
+
+    def transform(self, X):
+        for key in self.group_dict.keys():
+            X.loc[X[self.frature].isin(self.group_dict[key]), self.frature] = key
+        if not 'other' in self.group_dict:
+            X.loc[~X[self.frature].isin(self.group_dict.keys()), self.frature] = 'other'
+        X[self.frature].replace(np.nan, 'missing')
+        return X
+
+
 
 
 class FeatureRemoverByBias(BaseEstimator, TransformerMixin):
@@ -35,21 +72,6 @@ class FeatureRemoverByBias(BaseEstimator, TransformerMixin):
     def transform(self, X):
         return X[[col for col, bias in self.bias_scores.items() if bias < self.thresh]]
 
-
-class RowRemoverByFeatureValue(BaseEstimator, TransformerMixin):
-
-    def __init__(self, feature: str, exclude_vals: list):
-        self.name = f"RowRemoverByFeatureValue {feature}"
-        self.feature = feature
-        self.exclude_vals = exclude_vals
-        self.rows_to_drop = []
-
-    def fit(self, X, y=None):
-        self.rows_to_drop = X.loc[X[self.feature].isin(self.exclude_vals)].index
-        return self
-
-    def transform(self, X):
-        return X.drop(index=self.rows_to_drop).reset_index(drop=True)
 
 
 class CategoryReducer(BaseEstimator, TransformerMixin):
