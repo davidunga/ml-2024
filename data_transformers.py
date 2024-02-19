@@ -76,7 +76,7 @@ class FeatureRemoverByBias(BaseEstimator, TransformerMixin):
 
 class CategoryReducer(BaseEstimator, TransformerMixin):
 
-    def __init__(self, feature: str, lookup: dict[str, list]):
+    def __init__(self, feature: str, lookup: 'dict[str, list]'):
         self.name = f"CategoryReducer {feature}"
         self.feature = feature
         self.lookup = lookup
@@ -95,7 +95,8 @@ class CategoryReducer(BaseEstimator, TransformerMixin):
 
 
 class ColumnTypeSetter(BaseEstimator, TransformerMixin):
-    def __init__(self, type_: str, exclude: list[str] = None):
+    def __init__(self, type_: str, exclude: list = None):
+
         self.name = "ColumnTypeSetter"
         self.type_ = type_
         self.exclude = exclude if exclude else []
@@ -192,3 +193,14 @@ class OneHotConverter(BaseEstimator, TransformerMixin):
     def transform(self, X):
         return self._transformer.transform(X)
 
+class ReplaceValueToNan(BaseEstimator, TransformerMixin):
+
+    def __init__(self, value='?'):
+        self.name = 'ValueToNan'
+        self.value = value
+
+    def fit(self, X):
+        return X == self.value
+
+    def transform(self, X):
+        return X.replace(self.value, np.nan)
