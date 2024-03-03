@@ -7,6 +7,10 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
+def _get_categorical_colnames(df: pd.DataFrame) -> list:
+    return list(df.select_dtypes('category').columns)
+
+
 class ReplaceValueToNan(BaseEstimator, TransformerMixin):
     ''' changes a value to np.nan'''
 
@@ -15,30 +19,29 @@ class ReplaceValueToNan(BaseEstimator, TransformerMixin):
         self.value = value
 
     def fit(self, X):
-        return X == self.value
+        return self
 
     def transform(self, X):
         return X.replace(self.value, np.nan)
 
 
-class KeepTopValues(BaseEstimator, TransformerMixin):
-    ''' changes a value to np.nan'''
+class SetSmallPartToOther(BaseEstimator, TransformerMixin):
 
-    def __init__(self, feature, keep_top_amount=7):
-        self.name = 'KeepTopValues'
-        self.feature = feature
-        self.keep_top_amount = keep_top_amount
+    def __init__(self, thresh: float, features: list):
+        self.name = 'SetSmallPartToOther'
+        self.thresh = thresh
+        self.features = features
+        self.values_to_drop = []
 
     def fit(self, X):
         return self
 
     def transform(self, X):
-        unique, counts = np.unique(df_categorical[column].astype(str), return_counts=True)
-        sorted_indices = np.argsort(counts)[::-1]  # Reverse order to get descending sort indices
-        sorted_unique = unique[sorted_indices]
-        df.loc[~(df[column].isin(sorted_unique[:7])), column] = 'other'
-        return df
-
+        for col in self.features:
+            parts = X[col].value_counts(normalize=True)
+            small_parts = parts[parts < self.thresh].index
+            X.loc[X[col].isin(small_parts), col] = 'Other'
+        return X
 
 
 class FeatureRemoverByName(BaseEstimator, TransformerMixin):
@@ -52,6 +55,7 @@ class FeatureRemoverByName(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         return X.drop(columns=self.features_to_remove, inplace=False)
+
 
 class RowRemoverByFeatureValue(BaseEstimator, TransformerMixin):
     '''Drops rows based on values list in a feature'''
@@ -105,7 +109,6 @@ class FeatureRemoverByBias(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         return X[[col for col, bias in self.bias_scores.items() if bias < self.thresh]]
-
 
 
 class CategoryReducer(BaseEstimator, TransformerMixin):
@@ -213,15 +216,23 @@ class OneHotConverter(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.name = "OneHotConverter"
         self._transformer = None
+        self.reverse_feature_names = []
         pass
 
     def fit(self, X, y=None):
+
+        def _combinator(feature, category):
+            return f"{feature}.{str(category)}"
+
         if isinstance(X, tuple):
             X = X[0]
-        features = list(X.select_dtypes('category').columns)
+        features = _get_categorical_colnames(X)
         self._transformer = ColumnTransformer(transformers=[
-            (self.name, Pipeline(steps=[(self.name, OneHotEncoder(handle_unknown="error"))]), features)])
+            (self.name, Pipeline(steps=[(self.name, OneHotEncoder(handle_unknown="error",
+                                                                  feature_name_combiner=_combinator))]), features)])
         self._transformer.fit(X)
+        self.reverse_feature_names = [s.split('__')[-1].split('.')[0]
+                                      for s in self._transformer.get_feature_names_out()]
         return self
 
     def transform(self, X):

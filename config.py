@@ -16,6 +16,8 @@ _config = {
         'gender': ['Unknown/Invalid'],
     },
     'data.bias_thresh': 0.95,
+    'data.small_part_features': ['medical_specialty'],
+    'data.small_part_thresh': 0.01,
     'data.readmitted_groups': {'YES': ['<30'], 'NO': ['>30', 'NO']},
     'data.recategorize': {
         'age': {

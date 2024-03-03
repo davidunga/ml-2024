@@ -4,7 +4,7 @@ from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from data_transformers import ColumnTypeSetter, FeatureRemoverByBias, FeatureRemoverByName, \
-    RowRemoverByFeatureValue, CategoryReducer, XySplitter, ICDConverter, OneHotConverter
+    RowRemoverByFeatureValue, CategoryReducer, XySplitter, ICDConverter, OneHotConverter, SetSmallPartToOther
 
 NUMERIC_COLS = ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
                 'num_medications', 'number_outpatient', 'number_emergency',
@@ -37,6 +37,9 @@ def make_feature_prep_pipe(config: dict) -> Pipeline:
         steps.append(CategoryReducer(feature=col, lookup=lookup))
 
     steps.append(ICDConverter(features=['diag_1', 'diag_2', 'diag_3']))
+
+    steps.append(SetSmallPartToOther(thresh=config['data.small_part_thresh'],
+                                     features=config['data.small_part_features']))
 
     # set column types to be either categorical or numeric
     steps.append(ColumnTypeSetter(type_='category', exclude=NUMERIC_COLS))
