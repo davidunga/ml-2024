@@ -7,6 +7,40 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
+class ReplaceValueToNan(BaseEstimator, TransformerMixin):
+    ''' changes a value to np.nan'''
+
+    def __init__(self, value='?'):
+        self.name = 'ValueToNan'
+        self.value = value
+
+    def fit(self, X):
+        return X == self.value
+
+    def transform(self, X):
+        return X.replace(self.value, np.nan)
+
+
+class KeepTopValues(BaseEstimator, TransformerMixin):
+    ''' changes a value to np.nan'''
+
+    def __init__(self, feature, keep_top_amount=7):
+        self.name = 'KeepTopValues'
+        self.feature = feature
+        self.keep_top_amount = keep_top_amount
+
+    def fit(self, X):
+        return self
+
+    def transform(self, X):
+        unique, counts = np.unique(df_categorical[column].astype(str), return_counts=True)
+        sorted_indices = np.argsort(counts)[::-1]  # Reverse order to get descending sort indices
+        sorted_unique = unique[sorted_indices]
+        df.loc[~(df[column].isin(sorted_unique[:7])), column] = 'other'
+        return df
+
+
+
 class FeatureRemoverByName(BaseEstimator, TransformerMixin):
     '''Drops features based on feature list'''
     def __init__(self, features_to_remove: list):
@@ -193,14 +227,3 @@ class OneHotConverter(BaseEstimator, TransformerMixin):
     def transform(self, X):
         return self._transformer.transform(X)
 
-class ReplaceValueToNan(BaseEstimator, TransformerMixin):
-
-    def __init__(self, value='?'):
-        self.name = 'ValueToNan'
-        self.value = value
-
-    def fit(self, X):
-        return X == self.value
-
-    def transform(self, X):
-        return X.replace(self.value, np.nan)
