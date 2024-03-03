@@ -49,6 +49,7 @@ class DiabetesDiag(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
+        #make sure icd9 is correct!!
         if self.trans:
             X["diabetes_diag"]= X[["diag_1", "diag_2", "diag_3"]].apply(lambda row: ("diabetes" or "endocrine/nutritional/metabolic diseases and immunity disorders") in row.values, axis=1)
 
@@ -104,4 +105,34 @@ class RobustNumFeatScaler(BaseEstimator, TransformerMixin):
             X[num_features] = RobustScaler().fit_transform(X[num_features])
 
             return X
-    
+
+class RemovePregenant(BaseEstimator, TransformerMixin):
+    '''remove pregenancy related cases'''
+    def __init__(self, trans=True):
+        self.trans=trans
+
+
+    def fit(self, X, y=None):
+        
+        return self
+
+    def transform(self, X):
+        if self.trans:
+            #make sure icd9 is correct!!
+            X["preg_diag"]= X[["diag_1", "diag_2", "diag_3"]].apply(lambda row: (11) in row.values, axis=1)
+
+            return X[X.preg_diag!=True]
+
+class RemoveKids(BaseEstimator, TransformerMixin):
+    '''Removes kids from the dataset'''
+    def __init__(self, trans=True):
+        self.trans=trans
+
+
+    def fit(self, X, y=None):
+        
+        return self
+
+    def transform(self, X):
+        if self.trans:
+            return X[X.age_mean>18]
