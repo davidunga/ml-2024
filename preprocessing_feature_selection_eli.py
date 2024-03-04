@@ -7,6 +7,24 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, RobustScaler
 from sklearn.base import BaseEstimator, TransformerMixin
 
+class RobustNumFeatScaler(BaseEstimator, TransformerMixin):
+
+    def __init__(self, trans=True):
+        self.trans=trans
+
+
+    def fit(self, X, y=None):
+        
+        return self
+
+    def transform(self, X):
+        if self.trans:
+            num_features = ['time_in_hospital', 'num_lab_procedures',
+                        'num_procedures', 'num_medications', 'number_outpatient',
+                        'number_emergency', 'number_inpatient', 'number_diagnoses']
+            X[num_features] = RobustScaler().fit_transform(X[num_features])
+
+            return X
 
 
 class RowRemoverDuplicatePatient(BaseEstimator, TransformerMixin):
@@ -87,24 +105,6 @@ class MedHelpAdder(BaseEstimator, TransformerMixin):
 
             return X
 
-class RobustNumFeatScaler(BaseEstimator, TransformerMixin):
-
-    def __init__(self, trans=True):
-        self.trans=trans
-
-
-    def fit(self, X, y=None):
-        
-        return self
-
-    def transform(self, X):
-        if self.trans:
-            num_features = ['time_in_hospital', 'num_lab_procedures',
-                        'num_procedures', 'num_medications', 'number_outpatient',
-                        'number_emergency', 'number_inpatient', 'number_diagnoses']
-            X[num_features] = RobustScaler().fit_transform(X[num_features])
-
-            return X
 
 class RemovePregenant(BaseEstimator, TransformerMixin):
     '''remove pregenancy related cases'''
@@ -125,8 +125,10 @@ class RemovePregenant(BaseEstimator, TransformerMixin):
 
 class RemoveKids(BaseEstimator, TransformerMixin):
     '''Removes kids from the dataset'''
-    def __init__(self, trans=True):
+    def __init__(self, trans=True,min_age_thresh=18):
         self.trans=trans
+        self.min_age_thresh=min_age_thresh
+        
 
 
     def fit(self, X, y=None):
@@ -135,4 +137,4 @@ class RemoveKids(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         if self.trans:
-            return X[X.age_mean>18]
+            return X[X.age_mean>min_age_thresh]
