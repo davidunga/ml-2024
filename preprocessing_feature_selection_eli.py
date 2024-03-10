@@ -85,7 +85,10 @@ class MedInterventionAdder(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         if self.trans:
-            X["number_interventions"]= X['num_lab_procedures']+X['num_procedures']+X['num_medications']
+            X["num_lab_procedures_p_day"]= X['num_lab_procedures']/X["time_in_hospital"]
+            X["num_procedures_p_day"]=X['num_procedures']/X["time_in_hospital"]
+            X["num_medications_p_day"]=X['num_medications']/X["time_in_hospital"]
+            X["num_interventions_p_day"]=X["num_medications_p_day"]+X["num_procedures_p_day"]+X["num_lab_procedures_p_day"]
 
             return X
     
