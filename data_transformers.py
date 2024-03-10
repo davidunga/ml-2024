@@ -1,40 +1,97 @@
 import pandas as pd
 import numpy as np
-from paths import DATA_PATH
+from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, PowerTransformer
 from sklearn.base import BaseEstimator, TransformerMixin
+import imblearn as imbl
 
 
-def _get_categorical_colnames(df: pd.DataFrame) -> list:
-    return list(df.select_dtypes('category').columns)
+class DataTransformer(BaseEstimator, TransformerMixin):
+
+    def fit(self, *args):
+        return self
+
+    @property
+    def name(self):
+        name = self.__class__.__name__
+        for attr in ['feature', 'method']:
+            if hasattr(self, attr):
+                name += f"[{getattr(self, attr)}]"
+        return name
 
 
-class ReplaceValueToNan(BaseEstimator, TransformerMixin):
+class Standardizer(DataTransformer):
+
+    def __init__(self, method: str = 'yeo-johnson'):
+        self.method = method
+        self.features = []
+        self._transformer = PowerTransformer(method=self.method) if self.method != 'none' else None
+
+    def fit(self, X: pd.DataFrame):
+        if self.method != 'none':
+            self.features = X.select_dtypes(exclude='category').columns
+            self._transformer.fit(.001 + X[self.features].to_numpy())
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if self.method != 'none':
+            X[self.features] = self._transformer.transform(.001 + X[self.features].to_numpy())
+        return X
+
+
+class Balancer(DataTransformer):
+    """ wrapper for data balancing classes """
+
+    METHODS = {
+        # method_name : (sampler_type, sampler_params)
+        'RandomUnderSampler': (imbl.under_sampling.RandomUnderSampler, {'random_state': 1}),
+        'NearMiss1': (imbl.under_sampling.NearMiss, {'version': 1}),
+        'InstanceHardnessThreshold': (imbl.under_sampling.InstanceHardnessThreshold,
+                                      {'random_state': 1, 'cv': 5, 'estimator': LogisticRegression()}),
+        'SMOTENC': (imbl.over_sampling.SMOTENC, {'categorical_features': 'auto'})
+    }
+    CATEGORICAL_METHODS = ('SMOTENC',)
+
+    def __init__(self, method: str, params: dict = None):
+        """
+        method: method name, must me key of METHODS
+        params: override params specified in METHODS. keys that do not appear in METHODS params are ignored.
+        """
+        self.method = method
+        sampler_type, sampler_params = Balancer.METHODS[method]
+        if params:
+            sampler_params = {k: params.get(k, v) for k, v in sampler_params.items()}
+        self._sampler = sampler_type(**sampler_params)
+
+    @property
+    def is_categorical(self) -> bool:
+        """ does transformer expect categorical (dataframe) input? """
+        return self.method in Balancer.CATEGORICAL_METHODS
+
+    def fit_transform(self, Xy, *args):
+        return self._sampler.fit_resample(Xy[0], Xy[1])
+
+    def fit(self, *args): raise AssertionError("Only fit_transform should be called")
+    def transform(self, *args): raise AssertionError("Only fit_transform should be called")
+
+
+class ReplaceValueToNan(DataTransformer):
     ''' changes a value to np.nan'''
 
     def __init__(self, value='?'):
-        self.name = 'ValueToNan'
         self.value = value
-
-    def fit(self, X):
-        return self
 
     def transform(self, X):
         return X.replace(self.value, np.nan)
 
 
-class SetSmallPartToOther(BaseEstimator, TransformerMixin):
+class SetRaresToOther(DataTransformer):
 
     def __init__(self, thresh: float, features: list):
-        self.name = 'SetSmallPartToOther'
         self.thresh = thresh
         self.features = features
-        self.values_to_drop = []
-
-    def fit(self, X):
-        return self
 
     def transform(self, X):
         for col in self.features:
@@ -44,23 +101,20 @@ class SetSmallPartToOther(BaseEstimator, TransformerMixin):
         return X
 
 
-class FeatureRemoverByName(BaseEstimator, TransformerMixin):
-    '''Drops features based on feature list'''
-    def __init__(self, features_to_remove: list):
-        self.name = "FeatureRemoverByName"
-        self.features_to_remove = features_to_remove
+class FeatureRemoverByName(DataTransformer):
+    ''' Drop features based on feature list '''
 
-    def fit(self, X, y=None):
-        return self
+    def __init__(self, features_to_remove: list):
+        self.features_to_remove = features_to_remove
 
     def transform(self, X):
         return X.drop(columns=self.features_to_remove, inplace=False)
 
 
-class RowRemoverByFeatureValue(BaseEstimator, TransformerMixin):
-    '''Drops rows based on values list in a feature'''
+class RowRemoverByFeatureValue(DataTransformer):
+    ''' Drop rows based on values list in a feature '''
+
     def __init__(self, feature: str, exclude_vals: list):
-        self.name = f"RowRemoverByFeatureValue {feature}"
         self.feature = feature
         self.exclude_vals = exclude_vals
         self.rows_to_drop = []
@@ -73,32 +127,9 @@ class RowRemoverByFeatureValue(BaseEstimator, TransformerMixin):
         return X.drop(index=self.rows_to_drop).reset_index(drop=True)
 
 
-class GroupFeatureValuesByDict(BaseEstimator, TransformerMixin):
-    '''group multiple values inside a feature using dict: {new_value: [list_of_old_values]}
-        all values that are not defined in the group_dict will return as other '''
-    def __init__(self, feature: str, group_dict: dict):
-        self.name = f"GroupFeatureValuesByDict {feature}"
-        self.frature = feature
-        self.group_dict = group_dict
-
-    def fit(self, X):
-        return self
-
-    def transform(self, X):
-        for key in self.group_dict.keys():
-            X.loc[X[self.frature].isin(self.group_dict[key]), self.frature] = key
-        if not 'other' in self.group_dict:
-            X.loc[~X[self.frature].isin(self.group_dict.keys()), self.frature] = 'other'
-        X[self.frature].replace(np.nan, 'missing')
-        return X
-
-
-
-
-class FeatureRemoverByBias(BaseEstimator, TransformerMixin):
+class FeatureRemoverByBias(DataTransformer):
 
     def __init__(self, thresh: float = .95):
-        self.name = "FeatureRemoverByBias"
         self.thresh = thresh
         self.bias_scores = {}
 
@@ -111,10 +142,13 @@ class FeatureRemoverByBias(BaseEstimator, TransformerMixin):
         return X[[col for col, bias in self.bias_scores.items() if bias < self.thresh]]
 
 
-class CategoryReducer(BaseEstimator, TransformerMixin):
+class CategoryReducer(DataTransformer):
+    """ Reduce category values according to lookup
+        NA values are converted to 'missing'
+        Values that are not in lookup are converted to 'Other'
+    """
 
-    def __init__(self, feature: str, lookup: 'dict[str, list]'):
-        self.name = f"CategoryReducer {feature}"
+    def __init__(self, feature: str, lookup: dict[str, list]):
         self.feature = feature
         self.lookup = lookup
         self.new_labels = None
@@ -131,37 +165,27 @@ class CategoryReducer(BaseEstimator, TransformerMixin):
         return X
 
 
-class ColumnTypeSetter(BaseEstimator, TransformerMixin):
-    def __init__(self, type_: str, exclude: list = None):
+class ColumnTypeSetter(DataTransformer):
 
-        self.name = "ColumnTypeSetter"
+    def __init__(self, type_: str = 'category', exclude: list[str] = None):
         self.type_ = type_
         self.exclude = exclude if exclude else []
 
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         for col in set(X.columns).difference(self.exclude):
             X[col] = X[col].astype(self.type_)
         return X
 
 
-class XySplitter(BaseEstimator, TransformerMixin):
-    def __init__(self, target_col: str, encode_target: bool = True, sanity_mode: str = 'none'):
+class XySplitter(DataTransformer):
+    """ Split dataframe to X, y dataframes """
+
+    def __init__(self, target_col: str, sanity_mode: str = 'none'):
         assert sanity_mode in ('none', 'must_fail', 'must_succeed')
-        self.name = "XySplitter"
         self.target_col = target_col
-        self.encode_target = encode_target
         self.sanity_mode = sanity_mode
-        self._label_encoder = LabelEncoder()
 
-    def fit(self, X, y=None):
-        if self.encode_target:
-            self._label_encoder.fit(X[self.target_col])
-        return self
-
-    def transform(self, X):
+    def transform(self, X: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         y = X[self.target_col]
 
         if self.sanity_mode == 'must_succeed':
@@ -173,12 +197,10 @@ class XySplitter(BaseEstimator, TransformerMixin):
             y = np.random.default_rng(0).permutation(y)
             print("! sanity_mode=", self.sanity_mode, "-> Shuffled target labels.")
 
-        if self.encode_target:
-            y = self._label_encoder.transform(y)
         return X, y
 
 
-class ICDConverter(BaseEstimator, TransformerMixin):
+class ICDConverter(DataTransformer):
 
     _ICD_GROUPS = {
         1: range(0, 140), 2: range(140, 240), 3: range(240, 280), 4: range(280, 290), 5: range(290, 320),
@@ -188,7 +210,6 @@ class ICDConverter(BaseEstimator, TransformerMixin):
     }
 
     def __init__(self, features: list):
-        self.name = "ICDConverter"
         self.lookup = {value: key for key, values_list in self._ICD_GROUPS.items() for value in values_list}
         self.features = features
 
@@ -202,39 +223,42 @@ class ICDConverter(BaseEstimator, TransformerMixin):
             normalized_value = int(value.split('.')[0])
         return self.lookup[normalized_value]
 
-    def fit(self, X, y=None):
-        return self
-
     def transform(self, X):
         for feature in self.features:
             X[feature] = [self._convert_value(value) for value in X[feature]]
         return X
 
 
-class OneHotConverter(BaseEstimator, TransformerMixin):
+class OneHotConverter(DataTransformer):
 
     def __init__(self):
-        self.name = "OneHotConverter"
-        self._transformer = None
+        self._feature_transformer = None
+        self._label_transformer = LabelEncoder()
         self.reverse_feature_names = []
         pass
 
-    def fit(self, X, y=None):
+    def fit(self, Xy: tuple[pd.DataFrame, pd.DataFrame]):
+
+        sep = "."
 
         def _combinator(feature, category):
-            return f"{feature}.{str(category)}"
+            return f"{feature}{sep}{str(category)}"
 
-        if isinstance(X, tuple):
-            X = X[0]
-        features = _get_categorical_colnames(X)
-        self._transformer = ColumnTransformer(transformers=[
-            (self.name, Pipeline(steps=[(self.name, OneHotEncoder(handle_unknown="error",
-                                                                  feature_name_combiner=_combinator))]), features)])
-        self._transformer.fit(X)
-        self.reverse_feature_names = [s.split('__')[-1].split('.')[0]
-                                      for s in self._transformer.get_feature_names_out()]
+        onehot_encoder = OneHotEncoder(handle_unknown="error", feature_name_combiner=_combinator)
+        categorical_cols = Xy[0].select_dtypes('category').columns
+        self._feature_transformer = ColumnTransformer(transformers=[
+            (self.name, Pipeline(steps=[(self.name, onehot_encoder)]), categorical_cols)])
+
+        self._feature_transformer.fit(Xy[0])
+        self._label_transformer.fit(Xy[1])
+        self.reverse_feature_names = [s.split('__')[-1].split(sep)[0]
+                                      for s in self._feature_transformer.get_feature_names_out()]
+
         return self
 
-    def transform(self, X):
-        return self._transformer.transform(X)
+    def transform(self, Xy: tuple[pd.DataFrame, pd.DataFrame]) -> tuple[np.ndarray, np.ndarray]:
+        X = self._feature_transformer.transform(Xy[0])
+        y = self._label_transformer.transform(Xy[1])
+        return X, y
+
 

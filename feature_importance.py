@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from data import load_data, make_data_init_pipe, make_feature_prep_pipe
+from data import load_data, build_pipeline
 from config import get_config, get_config_id
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.linear_model import LogisticRegression
@@ -38,17 +38,17 @@ def analyze_feature_importance(config: dict, model = None, normalize: bool = Tru
     if model is None:
         model = LogisticRegression(penalty='l2')
 
-    data_init_pipe = make_data_init_pipe(config)
-    feature_prep_pipe = make_feature_prep_pipe(config)
+    pipe = build_pipeline(config, verbose=2)
 
     raw_data = load_data(config)
-    raw_features, target = data_init_pipe.fit_transform(raw_data)
-    features = feature_prep_pipe.fit_transform(raw_features)
+    X, y = pipe.fit_transform(raw_data)
 
-    model.fit(features, target)
+    print(f"Target labels ratio: {np.mean(y):2.2%}")
+
+    model.fit(X, y)
 
     importance_df = get_feature_importance(
-        model, feature_prep_pipe[-1].reverse_feature_names, normalize=normalize)
+        model, pipe['OneHotConverter'].reverse_feature_names, normalize=normalize)
 
     draw_feature_importance(importance_df)
     plt.title("Feature Importance by " + str(model))

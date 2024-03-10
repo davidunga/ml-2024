@@ -10,6 +10,11 @@ _config = {
     'cv.n_folds': 5,
     'cv.scores': ['balanced_accuracy', 'roc_auc'],
 
+    'balance.method': 'RandomUnderSampler',
+    'balance.params': {'random_state': 1},
+
+    'data.standardize': 'none',
+
     'data.exclude_cols': ['weight', 'payer_code', 'encounter_id', 'patient_nbr'],
     'data.exclude_rows_where': {
         'discharge_disposition_id': [11, 13, 14, 19, 20, 21],
@@ -18,8 +23,11 @@ _config = {
     'data.bias_thresh': 0.95,
     'data.small_part_features': ['medical_specialty'],
     'data.small_part_thresh': 0.01,
-    'data.readmitted_groups': {'YES': ['<30'], 'NO': ['>30', 'NO']},
     'data.recategorize': {
+        'readmitted': {
+            'YES': ['<30'],
+            'NO': ['>30', 'NO']
+        },
         'age': {
             '<30': ['[0-10)', '[10-20)', '[20-30)'],
             '30-60': ['[30-40)', '[40-50)', '[50-60)'],
