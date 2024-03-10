@@ -104,7 +104,8 @@ class MedHelpAdder(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         if self.trans:
-            X["number_med_encounters"]= X['time_in_hospital']+X['number_outpatient']+X['number_emergency']+X['number_inpatient']
+            X["number_med_encounters"]= X['number_outpatient']+X['number_emergency']+X['number_inpatient']
+            X["number_non_emergency_med_encounters"]= X['number_outpatient']+X['number_inpatient']
 
             return X
 
