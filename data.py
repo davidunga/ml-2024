@@ -42,8 +42,7 @@ def build_pipeline(config: dict, verbose: int = 1) -> Pipeline:
     steps.append(ColumnTypeSetter(exclude=NUMERIC_COLS))
 
     # standardize numeric features
-    if config['data.standardize'] != 'none':
-        steps.append(Standardizer(method=config['data.standardize']))
+    steps.append(Standardizer(method=config['standardize.method'], scale=config['standardize.scale']))
 
     # split to X, y
     steps.append(XySplitter(target_col=TARGET_COL))

@@ -13,7 +13,8 @@ _config = {
     'balance.method': 'RandomUnderSampler',
     'balance.params': {'random_state': 1},
 
-    'data.standardize': 'none',
+    'standardize.method': 'sqrt',
+    'standardize.scale': True,
 
     'data.exclude_cols': ['weight', 'payer_code', 'encounter_id', 'patient_nbr'],
     'data.exclude_rows_where': {

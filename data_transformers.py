@@ -24,20 +24,23 @@ class DataTransformer(BaseEstimator, TransformerMixin):
 
 class Standardizer(DataTransformer):
 
-    def __init__(self, method: str = 'yeo-johnson'):
+    def __init__(self, method: str = 'sqrt', scale: bool = True):
         self.method = method
+        self.scale = scale
         self.features = []
-        self._transformer = PowerTransformer(method=self.method) if self.method != 'none' else None
-
-    def fit(self, X: pd.DataFrame):
-        if self.method != 'none':
-            self.features = X.select_dtypes(exclude='category').columns
-            self._transformer.fit(.001 + X[self.features].to_numpy())
-        return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if self.method != 'none':
-            X[self.features] = self._transformer.transform(.001 + X[self.features].to_numpy())
+        self.features = X.select_dtypes(exclude='category').columns
+        if self.method == 'sqrt':
+            X[self.features] = np.sqrt(X[self.features].to_numpy())
+        elif self.method == 'log':
+            X[self.features] = np.log(1 + X[self.features].to_numpy())
+        elif self.method == 'none':
+            pass
+        else:
+            raise ValueError('Unknown method')
+        if self.scale:
+            X[self.features] /= X[self.features].std()
         return X
 
 
