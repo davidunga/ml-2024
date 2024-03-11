@@ -13,17 +13,30 @@ _config = {
     'balance.method': 'RandomUnderSampler',
     'balance.params': {'random_state': 1},
 
-    'standardize.method': 'sqrt',
-    'standardize.scale': True,
+    'data.standardize': {'outlier_p': .01, 'offset': .5},
+
+    'data.add_by_sum': {
+        'num_visits': ['number_outpatient', 'number_inpatient', 'number_emergency'],
+        'num_nonEm_visits': ['number_outpatient', 'number_inpatient']
+    },
+
+    'data.add_by_normalize': {
+        'time_in_hospital': (['num_lab_procedures', 'num_procedures', 'num_medications'], 'perDay')
+    },
+
+    'data.exclude_rows_by_duplicates': ['patient_nbr'],
 
     'data.exclude_cols': ['weight', 'payer_code', 'encounter_id', 'patient_nbr'],
+    'data.exclude_pregnancy_diabetes': False,
     'data.exclude_rows_where': {
         'discharge_disposition_id': [11, 13, 14, 19, 20, 21],
         'gender': ['Unknown/Invalid'],
     },
+
     'data.bias_thresh': 0.95,
-    'data.small_part_features': ['medical_specialty'],
-    'data.small_part_thresh': 0.01,
+    'data.rare_to_other_features': ['medical_specialty'],
+    'data.rare_to_other_thresh': 0.01,
+
     'data.recategorize': {
         'readmitted': {
             'YES': ['<30'],

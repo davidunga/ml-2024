@@ -36,7 +36,7 @@ def draw_feature_importance(importance_df: pd.DataFrame):
 def analyze_feature_importance(config: dict, model = None, normalize: bool = True):
 
     if model is None:
-        model = LogisticRegression(penalty='l2')
+        model = LogisticRegression(penalty='l2', max_iter=500)
 
     pipe = build_pipeline(config, verbose=2)
 

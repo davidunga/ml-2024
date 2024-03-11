@@ -6,6 +6,16 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, PowerTransformer
 from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
+from scipy.stats import shapiro
+
+
+def categorical_cols(df: pd.DataFrame):
+    return df.select_dtypes(include=['category']).columns
+
+
+def numerical_cols(df: pd.DataFrame):
+    return df.select_dtypes(include=['number']).columns
+
 
 
 class DataTransformer(BaseEstimator, TransformerMixin):
@@ -23,24 +33,37 @@ class DataTransformer(BaseEstimator, TransformerMixin):
 
 
 class Standardizer(DataTransformer):
+    """ Transform numeric features to be approximately normal and remove outliers """
 
-    def __init__(self, method: str = 'sqrt', scale: bool = True):
-        self.method = method
-        self.scale = scale
-        self.features = []
+    TRANSFORMS = {'none': lambda x: x, 'sqrt': np.sqrt}
+
+    def __init__(self, outlier_p: float = .05, offset: float = 0):
+        self.outlier_p = outlier_p
+        self.offset = offset
+        self.transforms = {}
+
+    def fit(self, X: pd.DataFrame):
+        for feature in numerical_cols(X):
+            x = X[feature].to_numpy()
+            best_normality_score = 0
+            for tform, func in self.TRANSFORMS.items():
+                try:
+                    x_transformed = func(x)
+                except:
+                    continue
+                normality_score = shapiro(x_transformed).statistic
+                if normality_score > best_normality_score:
+                    best_normality_score = normality_score
+                    self.transforms[feature] = (tform, np.mean(x_transformed), np.std(x_transformed))
+        return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        self.features = X.select_dtypes(exclude='category').columns
-        if self.method == 'sqrt':
-            X[self.features] = np.sqrt(X[self.features].to_numpy())
-        elif self.method == 'log':
-            X[self.features] = np.log(1 + X[self.features].to_numpy())
-        elif self.method == 'none':
-            pass
-        else:
-            raise ValueError('Unknown method')
-        if self.scale:
-            X[self.features] /= X[self.features].std()
+        inlier_range = [100 * self.outlier_p, 100 * (1 - self.outlier_p)]
+        for feature, (tform, mean, sd) in self.transforms.items():
+            func = self.TRANSFORMS[tform]
+            x = func(X[feature].to_numpy())
+            x = (x - mean) / sd + self.offset
+            X[feature] = np.clip(x, *np.percentile(x, inlier_range))
         return X
 
 
@@ -117,17 +140,42 @@ class FeatureRemoverByName(DataTransformer):
 class RowRemoverByFeatureValue(DataTransformer):
     ''' Drop rows based on values list in a feature '''
 
-    def __init__(self, feature: str, exclude_vals: list):
-        self.feature = feature
+    def __init__(self, feature: str | list[str], exclude_vals: list):
+        self.feature = ','.join(feature) if isinstance(feature, list) else feature
         self.exclude_vals = exclude_vals
         self.rows_to_drop = []
 
     def fit(self, X, y=None):
-        self.rows_to_drop = X.loc[X[self.feature].isin(self.exclude_vals)].index
+        cols = self.feature.split(',')
+        self.rows_to_drop = X.loc[X[cols].isin(self.exclude_vals).any(axis=1)].index
         return self
 
-    def transform(self, X):
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         return X.drop(index=self.rows_to_drop).reset_index(drop=True)
+
+
+class RowRemoverByDuplicates(DataTransformer):
+    """ Drop duplicate rows """
+
+    def __init__(self, feature: str | list[str]):
+        self.feature = ','.join(feature) if isinstance(feature, list) else feature
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        return X.drop_duplicates(self.feature.split(',')).reset_index(drop=True)
+
+
+class AddFeatureAverageAge(DataTransformer):
+    """ Convert age group category to numeric """
+
+    def __init__(self, age_group_col: str):
+        self.age_group_col = age_group_col
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        new_colname = self.age_group_col + '_avg'
+        assert new_colname not in X
+        X[new_colname] = [(int(bounds[0]) + int(bounds[1])) // 2
+                          for bounds in (s[1:-1].split('-') for s in X[self.age_group_col])]
+        return X
 
 
 class FeatureRemoverByBias(DataTransformer):
@@ -205,15 +253,16 @@ class XySplitter(DataTransformer):
 
 class ICDConverter(DataTransformer):
 
-    _ICD_GROUPS = {
+    ICD_GROUPS = {
         1: range(0, 140), 2: range(140, 240), 3: range(240, 280), 4: range(280, 290), 5: range(290, 320),
         6: range(320, 390), 7: range(390, 460), 8: range(460, 520), 9: range(520, 580), 10: range(580, 630),
         11: range(630, 680), 12: range(680, 710), 13: range(710, 740), 14: range(740, 760),
         15: range(760, 780), 16: range(780, 800), 17: range(800, 1000), 18: ['E'], 19: ['V'], 0: ['nan']
     }
+    PREGNANCY_DIABETES_ICD = 648.8
 
     def __init__(self, features: list):
-        self.lookup = {value: key for key, values_list in self._ICD_GROUPS.items() for value in values_list}
+        self.lookup = {value: key for key, values_list in self.ICD_GROUPS.items() for value in values_list}
         self.features = features
 
     def _convert_value(self, value):
@@ -248,10 +297,10 @@ class OneHotConverter(DataTransformer):
             return f"{feature}{sep}{str(category)}"
 
         onehot_encoder = OneHotEncoder(handle_unknown="error", feature_name_combiner=_combinator)
-        categorical_cols = Xy[0].select_dtypes('category').columns
-        self._feature_transformer = ColumnTransformer(transformers=[
-            (self.name, Pipeline(steps=[(self.name, onehot_encoder)]), categorical_cols)])
-
+        self._feature_transformer = ColumnTransformer(
+            remainder='passthrough',
+            transformers=[(self.name, Pipeline(steps=[(self.name, onehot_encoder)]), categorical_cols(Xy[0]))]
+        )
         self._feature_transformer.fit(Xy[0])
         self._label_transformer.fit(Xy[1])
         self.reverse_feature_names = [s.split('__')[-1].split(sep)[0]
@@ -265,3 +314,26 @@ class OneHotConverter(DataTransformer):
         return X, y
 
 
+class AddFeatureByNormalizing(DataTransformer):
+
+    def __init__(self, to_normalize: list[str], normalize_by: str, suffix: str = "norm"):
+        self.to_normalize = to_normalize
+        self.normalize_by = normalize_by
+        self.suffix = suffix
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        for feature in self.to_normalize:
+            new_feature = f"{feature}_{self.suffix}"
+            X[new_feature] = X[feature].to_numpy() / (1e-6 + X[self.normalize_by].to_numpy())
+        return X
+
+
+class AddFeatureBySumming(DataTransformer):
+
+    def __init__(self, features_to_sum: dict[str, list[str]]):
+        self.features_to_sum = features_to_sum
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        for new_feature, features in self.features_to_sum.items():
+            X[new_feature] = X[features].sum(axis=1)
+        return X
