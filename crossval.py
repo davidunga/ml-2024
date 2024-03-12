@@ -1,10 +1,10 @@
 from sklearn.experimental import enable_halving_search_cv  # required
 from sklearn.model_selection import GridSearchCV, HalvingGridSearchCV, RandomizedSearchCV
 import paths
-from data import load_data, make_data_init_pipe, make_feature_prep_pipe
+from data import load_data, build_pipeline
 from config import get_config, get_config_id
 import pandas as pd
-
+from typing import Dict, List, Tuple
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.linear_model import LogisticRegression
 
@@ -52,18 +52,9 @@ def save_cv_results(results_df: pd.DataFrame):
 
 def run_crossval(config: Dict, grid: List):
 
-    # we use two pipelines:
-    # data_init_pipe is used for data initialization; it removes some of the rows, processes the target
-    #   variable, and separates the features from the target.
-    # feature_prep_pipe is a 'regular' preprocessing pipe: it operates only on X (features)
-    #   and is not allowed to remove rows or operate on the target variable
-
-    data_init_pipe = make_data_init_pipe(config)
-    feature_prep_pipe = make_feature_prep_pipe(config)
-
+    pipe = build_pipeline(config, verbose=2)
     raw_data = load_data(config)
-    raw_features, target = data_init_pipe.fit_transform(raw_data)
-    features = feature_prep_pipe.fit_transform(raw_features)
+    X, y = pipe.fit_transform(raw_data)
 
     cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'],
                'verbose': 0, 'refit': False, 'return_train_score': True}
@@ -74,7 +65,7 @@ def run_crossval(config: Dict, grid: List):
         for seed in range(config['cv.n_seeds']):
             model = model_type(random_state=seed)
             grid_search = GridSearchCV(model, params, **cv_args)
-            grid_search.fit(features, target)
+            grid_search.fit(X, y)
             results_df = pd.DataFrame({"model_name": model_name, "seed": seed, **grid_search.cv_results_})
             report_cv_results(results_df)
             save_cv_results(results_df)
