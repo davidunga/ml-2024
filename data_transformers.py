@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, P
 from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
 from scipy.stats import shapiro
+from typing import List, Dict, Tuple
 
 
 def categorical_cols(df: pd.DataFrame):
@@ -80,7 +81,7 @@ class Balancer(DataTransformer):
     }
     CATEGORICAL_METHODS = ('SMOTENC',)
 
-    def __init__(self, method: str, params: dict = None):
+    def __init__(self, method: str, params: Dict = None):
         """
         method: method name, must me key of METHODS
         params: override params specified in METHODS. keys that do not appear in METHODS params are ignored.
@@ -104,7 +105,6 @@ class Balancer(DataTransformer):
 
 
 class ReplaceValueToNan(DataTransformer):
-    ''' changes a value to np.nan'''
 
     def __init__(self, value='?'):
         self.value = value
@@ -115,7 +115,7 @@ class ReplaceValueToNan(DataTransformer):
 
 class SetRaresToOther(DataTransformer):
 
-    def __init__(self, thresh: float, features: list):
+    def __init__(self, thresh: float, features: List):
         self.thresh = thresh
         self.features = features
 
@@ -128,9 +128,9 @@ class SetRaresToOther(DataTransformer):
 
 
 class FeatureRemoverByName(DataTransformer):
-    ''' Drop features based on feature list '''
+    """ Drop features based on feature list """
 
-    def __init__(self, features_to_remove: list):
+    def __init__(self, features_to_remove: List):
         self.features_to_remove = features_to_remove
 
     def transform(self, X):
@@ -138,9 +138,9 @@ class FeatureRemoverByName(DataTransformer):
 
 
 class RowRemoverByFeatureValue(DataTransformer):
-    ''' Drop rows based on values list in a feature '''
+    """ Drop rows based on values list in a feature """
 
-    def __init__(self, feature: str | list[str], exclude_vals: list):
+    def __init__(self, feature: str | List[str], exclude_vals: List):
         self.feature = ','.join(feature) if isinstance(feature, list) else feature
         self.exclude_vals = exclude_vals
         self.rows_to_drop = []
@@ -157,7 +157,7 @@ class RowRemoverByFeatureValue(DataTransformer):
 class RowRemoverByDuplicates(DataTransformer):
     """ Drop duplicate rows """
 
-    def __init__(self, feature: str | list[str]):
+    def __init__(self, feature: str | List[str]):
         self.feature = ','.join(feature) if isinstance(feature, list) else feature
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -199,7 +199,7 @@ class CategoryReducer(DataTransformer):
         Values that are not in lookup are converted to 'Other'
     """
 
-    def __init__(self, feature: str, lookup: dict[str, list]):
+    def __init__(self, feature: str, lookup: Dict[str, List]):
         self.feature = feature
         self.lookup = lookup
         self.new_labels = None
@@ -218,7 +218,7 @@ class CategoryReducer(DataTransformer):
 
 class ColumnTypeSetter(DataTransformer):
 
-    def __init__(self, type_: str = 'category', exclude: list[str] = None):
+    def __init__(self, type_: str = 'category', exclude: List[str] = None):
         self.type_ = type_
         self.exclude = exclude if exclude else []
 
@@ -236,7 +236,7 @@ class XySplitter(DataTransformer):
         self.target_col = target_col
         self.sanity_mode = sanity_mode
 
-    def transform(self, X: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def transform(self, X: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         y = X[self.target_col]
 
         if self.sanity_mode == 'must_succeed':
@@ -261,7 +261,7 @@ class ICDConverter(DataTransformer):
     }
     PREGNANCY_DIABETES_ICD = 648.8
 
-    def __init__(self, features: list):
+    def __init__(self, features: List):
         self.lookup = {value: key for key, values_list in self.ICD_GROUPS.items() for value in values_list}
         self.features = features
 
@@ -289,7 +289,7 @@ class OneHotConverter(DataTransformer):
         self.reverse_feature_names = []
         pass
 
-    def fit(self, Xy: tuple[pd.DataFrame, pd.DataFrame]):
+    def fit(self, Xy: Tuple[pd.DataFrame, pd.DataFrame]):
 
         sep = "."
 
@@ -308,7 +308,7 @@ class OneHotConverter(DataTransformer):
 
         return self
 
-    def transform(self, Xy: tuple[pd.DataFrame, pd.DataFrame]) -> tuple[np.ndarray, np.ndarray]:
+    def transform(self, Xy: Tuple[pd.DataFrame, pd.DataFrame]) -> Tuple[np.ndarray, np.ndarray]:
         X = self._feature_transformer.transform(Xy[0])
         y = self._label_transformer.transform(Xy[1])
         return X, y
@@ -316,7 +316,7 @@ class OneHotConverter(DataTransformer):
 
 class AddFeatureByNormalizing(DataTransformer):
 
-    def __init__(self, to_normalize: list[str], normalize_by: str, suffix: str = "norm"):
+    def __init__(self, to_normalize: List[str], normalize_by: str, suffix: str = "norm"):
         self.to_normalize = to_normalize
         self.normalize_by = normalize_by
         self.suffix = suffix
@@ -330,10 +330,21 @@ class AddFeatureByNormalizing(DataTransformer):
 
 class AddFeatureBySumming(DataTransformer):
 
-    def __init__(self, features_to_sum: dict[str, list[str]]):
+    def __init__(self, features_to_sum: Dict[str, List[str]]):
         self.features_to_sum = features_to_sum
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         for new_feature, features in self.features_to_sum.items():
             X[new_feature] = X[features].sum(axis=1)
+        return X
+
+
+class SetEncounter(DataTransformer):
+
+    def transform(self, X):
+        X['encounter'] = 'None'
+        X.loc[X['A1Cresult'].isin(('>7', '>8')), 'encounter'] = '7_No'
+        X.loc[X['A1Cresult'].isin(('>7', '>8')) & (X['change'] == 'Ch'), 'encounter'] = '7_Ch'
+        X.loc[X['A1Cresult'] == 'Norm', 'encounter'] = 'Norm'
+        X.drop(columns=['A1Cresult', 'change'], inplace=True)
         return X

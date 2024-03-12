@@ -1,4 +1,5 @@
 import pandas as pd
+from typing import List, Tuple, Dict
 import numpy as np
 from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
@@ -6,7 +7,7 @@ from data_transformers import \
     ColumnTypeSetter, FeatureRemoverByBias, FeatureRemoverByName, \
     RowRemoverByFeatureValue, CategoryReducer, XySplitter, ICDConverter, \
     OneHotConverter, SetRaresToOther, Balancer, Standardizer, RowRemoverByDuplicates, \
-    AddFeatureAverageAge, AddFeatureByNormalizing, AddFeatureBySumming
+    AddFeatureAverageAge, AddFeatureByNormalizing, AddFeatureBySumming, SetEncounter
 
 
 TARGET_COL = 'readmitted'
@@ -16,7 +17,7 @@ NUMERIC_COLS = ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
 DIAGNOSIS_COLS = ['diag_1', 'diag_2', 'diag_3']
 
 
-def build_pipeline(config: dict, verbose: int = 1) -> Pipeline:
+def build_pipeline(config: Dict, verbose: int = 1) -> Pipeline:
     """ make pipeline which operates on columns, and is applied only to features """
 
     steps = []
@@ -27,6 +28,8 @@ def build_pipeline(config: dict, verbose: int = 1) -> Pipeline:
     #     steps.append(AddFeatureByNormalizing(to_normalize=to_normalize, normalize_by=normalize_by, suffix=suffix))
 
     steps.append(AddFeatureBySumming(config['data.add_by_sum']))
+
+    steps.append(SetEncounter())
 
     for col, exclude_vals in config['data.exclude_rows_where'].items():
         steps.append(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
@@ -78,7 +81,7 @@ def build_pipeline(config: dict, verbose: int = 1) -> Pipeline:
     return Pipeline(steps=[(step.name, step) for step in steps])
 
 
-def load_data(config: dict) -> pd.DataFrame:
+def load_data(config: Dict) -> pd.DataFrame:
     data_file = str(DATA_PATH / "diabetic_data.csv")
     df = pd.read_csv(data_file, na_values="?", dtype={'payer_code': str})
     return df

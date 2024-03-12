@@ -29,7 +29,7 @@ SMALL_GRID = [
 ]
 
 
-def make_cv_name(config: dict, model_name: str, seed: int):
+def make_cv_name(config: Dict, model_name: str, seed: int):
     return f"cfg{get_config_id(config)} {model_name} seed{seed}"
 
 
@@ -50,7 +50,7 @@ def save_cv_results(results_df: pd.DataFrame):
     results_df.to_csv(str(results_csv))
 
 
-def run_crossval(config: dict, grid: list):
+def run_crossval(config: Dict, grid: List):
 
     # we use two pipelines:
     # data_init_pipe is used for data initialization; it removes some of the rows, processes the target

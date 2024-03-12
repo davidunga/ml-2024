@@ -1,6 +1,7 @@
 from copy import deepcopy
 from hashlib import md5
 import json
+from typing import Dict, List, Tuple
 
 _config = {
 
@@ -62,11 +63,11 @@ _config = {
 }
 
 
-def get_config() -> dict:
+def get_config() -> Dict:
     return deepcopy(_config)
 
 
-def get_config_id(config: dict) -> str:
+def get_config_id(config: Dict) -> str:
     id_size = 6
     config_str = json.dumps(config)
     return md5(config_str.encode()).hexdigest()[:id_size]

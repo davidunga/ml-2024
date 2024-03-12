@@ -6,10 +6,10 @@ from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 from sklearn.linear_model import LogisticRegression
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from typing import Dict, List, Tuple
 
 def get_feature_importance(model,
-                           reverse_feature_names: list[str],
+                           reverse_feature_names: List[str],
                            reduce: str = 'sum',
                            normalize: bool = True) -> pd.DataFrame:
     try:
@@ -33,7 +33,7 @@ def draw_feature_importance(importance_df: pd.DataFrame):
     plt.tick_params(axis='x', labelrotation=75, labelsize=8)
 
 
-def analyze_feature_importance(config: dict, model = None, normalize: bool = True):
+def analyze_feature_importance(config: Dict, model = None, normalize: bool = True):
 
     if model is None:
         model = LogisticRegression(penalty='l2', max_iter=500)
