@@ -8,7 +8,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
 from scipy.stats import shapiro
 from typing import List, Dict, Tuple
-
+from copy import deepcopy
 
 def categorical_cols(df: pd.DataFrame):
     return df.select_dtypes(include=['category']).columns
@@ -214,6 +214,38 @@ class CategoryReducer(DataTransformer):
         assert len(self.new_labels) == len(X)
         X[self.feature] = self.new_labels
         return X
+
+
+class CategoryReducer_with_other(DataTransformer):
+    """ Reduce category values according to lookup
+        NA values are converted to 'missing'
+        Values that are not in lookup are converted to 'Other'
+        if "other" is in the lookup, keys that are not defined in the lookup will not change to "Other"
+    """
+    def __init__(self, feature: str, lookup: Dict[str, List]):
+       
+        self.feature = feature
+        self.lookup = lookup
+        self.new_labels = None
+        self.keys = [str.lower(key) for key in lookup.keys()]
+
+    def fit(self, X):
+        self.new_labels = deepcopy(X[self.feature])
+        
+        for key in self.lookup.keys():
+            self.new_labels[self.new_labels.isin(self.lookup[key])] = key
+        if not ('other' in self.keys):
+            self.new_labels[~self.new_labels.isin(self.lookup.keys())] = 'Other'
+        self.new_labels.replace(np.nan, 'Missing')
+        return self
+
+    def transform(self, X):
+        assert len(self.new_labels) == len(X)
+        X[self.feature] = self.new_labels
+        return X
+
+
+
 
 
 class ColumnTypeSetter(DataTransformer):
