@@ -1,5 +1,6 @@
 import pandas as pd
 from typing import List, Tuple, Dict
+from sklearn.model_selection import train_test_split
 import numpy as np
 from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
@@ -85,3 +86,17 @@ def load_data(config: Dict) -> pd.DataFrame:
     data_file = str(DATA_PATH / "diabetic_data.csv")
     df = pd.read_csv(data_file, na_values="?", dtype={'payer_code': str})
     return df
+
+
+class DataSplitter:
+
+    def __init__(self, random_state: int, shuffle: bool = True, stratify: bool = True):
+        self.random_state = random_state
+        self.shuffle = shuffle
+        self.stratify = stratify
+
+    def split(self, Xy, test_size):
+        X_train, X_test, y_train, y_test = train_test_split(
+            *Xy, test_size=test_size, shuffle=self.shuffle, random_state=self.random_state,
+            stratify=Xy[1] if self.stratify else None)
+        return (X_train, y_train), (X_test, y_test)
