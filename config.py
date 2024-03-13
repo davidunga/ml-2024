@@ -5,11 +5,18 @@ from typing import Dict, List, Tuple
 
 _config = {
 
+    'random_state': 1337,
+
     'data.sanity_mode': 'none',
+    'data.test_size': .2,
 
     'cv.n_seeds': 5,
     'cv.n_folds': 5,
-    'cv.scores': ['balanced_accuracy', 'roc_auc'],
+    'cv.scores': ['balanced_accuracy', 'roc_auc', 'f1', 'precision', 'recall'],
+    'cv.main_score': 'roc_auc',
+
+    'cv.base.val_size': .2,
+    'cv.base.early_stopping_rounds': 5,
 
     'balance.method': 'RandomUnderSampler',
     'balance.params': {'random_state': 1},
