@@ -80,7 +80,7 @@ def tune(config: Dict):
         base_grid = grids[model_name]['base_grid']
         fine_grid = grids[model_name]['fine_grid']
 
-        DEV = True
+        DEV = False
         if DEV:
             # smaller grid for dev/debug..
             base_grid = _reduce_grid(base_grid)
