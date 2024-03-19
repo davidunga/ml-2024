@@ -6,6 +6,22 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, RobustScaler
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.feature_selection import SelectFdr
+    
+class FeatureSelectionFstat(BaseEstimator, TransformerMixin):
+    '''Select most predictive features of target variable'''
+    def __init__(self,trans=True,alpha=0.05):
+        self.trans=trans
+        self.alpha=alpha
+
+
+    def fit(self, X, y=None):
+        
+        return self
+
+    def transform(self, X):
+        if self.trans: 
+            return SelectFdr(alpha=self.alpha).fit_transform(X, X["readmitted"])
 
 class RobustNumFeatScaler(BaseEstimator, TransformerMixin):
 
