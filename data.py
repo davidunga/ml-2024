@@ -7,8 +7,8 @@ from sklearn.pipeline import Pipeline
 from data_transformers import \
     ColumnTypeSetter, FeatureRemoverByBias, FeatureRemoverByName, \
     RowRemoverByFeatureValue, CategoryReducer, XySplitter, ICDConverter, \
-    OneHotConverter, SetRaresToOther, Balancer, Standardizer, RowRemoverByDuplicates, \
-    AddFeatureAverageAge, AddFeatureByNormalizing, AddFeatureBySumming, SetEncounter
+    OneHotConverter, CategoryGroupOthers, Balancer, Standardizer, RowRemoverByDuplicates, \
+    AddFeatureAverageAge, AddFeatureByNormalizing, AddFeatureBySumming, AddFeatureEncounter
 
 
 TARGET_COL = 'readmitted'
@@ -19,53 +19,57 @@ DIAGNOSIS_COLS = ['diag_1', 'diag_2', 'diag_3']
 
 
 def build_pipeline(config: Dict, verbose: int = 1) -> Pipeline:
-    """ make pipeline which operates on columns, and is applied only to features """
 
     steps = []
 
-    steps.append(AddFeatureAverageAge(age_group_col='age'))
+    # ----
+    # Add/remove FEATURES:
 
-    # for normalize_by, (to_normalize, suffix) in config['data.add_by_normalize'].items():
-    #     steps.append(AddFeatureByNormalizing(to_normalize=to_normalize, normalize_by=normalize_by, suffix=suffix))
+    for normalize_by, (to_normalize, suffix) in config['data.add_features.by_normalize'].items():
+        steps.append(AddFeatureByNormalizing(to_normalize=to_normalize, normalize_by=normalize_by, suffix=suffix))
 
-    steps.append(AddFeatureBySumming(config['data.add_by_sum']))
+    steps.append(AddFeatureBySumming(config['data.add_features.by_sum']))
 
-    steps.append(SetEncounter())
+    if config['data.add_features.create.average_age']:
+        steps.append(AddFeatureAverageAge(age_group_col='age'))
+    if config['data.add_features.create.encounter']:
+        steps.append(AddFeatureEncounter())
 
-    for col, exclude_vals in config['data.exclude_rows_where'].items():
-        steps.append(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
+    steps.append(FeatureRemoverByName(features_to_remove=config['data.exclude_features.by_name']))
 
-    if config['data.exclude_pregnancy_diabetes']:
+    # ----
+    # Reduce/group CATEGORIES:
+
+    for col, lookup in config['data.categories.reduce'].items():
+        steps.append(CategoryReducer(feature=col, lookup=lookup))
+
+    steps.append(CategoryGroupOthers(config['data.categories.group_others']))
+
+    steps.append(ICDConverter(features=DIAGNOSIS_COLS))
+
+    # ----
+    # Remove ROWS:
+
+    if config['data.exclude_rows.pregnancy_diabetes']:
         steps.append(RowRemoverByFeatureValue(feature=DIAGNOSIS_COLS,
                                               exclude_vals=[ICDConverter.PREGNANCY_DIABETES_ICD]))
 
-    steps.append(RowRemoverByDuplicates(config['data.exclude_rows_by_duplicates']))
+    for col, exclude_vals in config['data.exclude_rows.where'].items():
+        steps.append(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
 
-    # remove columns by name
-    steps.append(FeatureRemoverByName(features_to_remove=config['data.exclude_cols']))
+    steps.append(RowRemoverByDuplicates(config['data.exclude_rows.duplicate']))
 
-    # remove high bias (=near uniform) columns
-    steps.append(FeatureRemoverByBias(thresh=config['data.bias_thresh']))
-
-    # merge categories according to manually defined mapping
-    for col, lookup in config['data.recategorize'].items():
-        steps.append(CategoryReducer(feature=col, lookup=lookup))
-
-    # process diagnosis category levels
-    steps.append(ICDConverter(features=DIAGNOSIS_COLS))
-
-    # merge rare category levels to a single level ('other')
-    steps.append(SetRaresToOther(thresh=config['data.rare_to_other_thresh'],
-                                 features=config['data.rare_to_other_features']))
+    # ----
+    # Finalize:
 
     # set column types to be either categorical or numeric
     steps.append(ColumnTypeSetter(exclude=NUMERIC_COLS))
 
-    # standardize numeric features
-    steps.append(Standardizer(**config['data.standardize']))
-
     # split to X, y
     steps.append(XySplitter(target_col=TARGET_COL))
+
+    # standardize numeric features
+    steps.append(Standardizer(**config['data.standardize']))
 
     # balance & convert to one-hot
     balancer = Balancer(method=config['balance.method'], params=config['balance.params'])

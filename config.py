@@ -23,29 +23,38 @@ _config = {
 
     'data.standardize': {'outlier_p': .01, 'offset': .5},
 
-    'data.add_by_sum': {
+    'data.add_features.by_sum': {
         'num_visits': ['number_outpatient', 'number_inpatient', 'number_emergency'],
         'num_nonEm_visits': ['number_outpatient', 'number_inpatient']
     },
 
-    'data.add_by_normalize': {
+    'data.add_features.by_normalize': {
         'time_in_hospital': (['num_lab_procedures', 'num_procedures', 'num_medications'], 'perDay')
     },
 
-    'data.exclude_rows_by_duplicates': ['patient_nbr'],
+    'data.add_features.construct': {
+        'average_age': True,
+        'encounter': True
+    },
 
-    'data.exclude_cols': ['weight', 'payer_code', 'encounter_id', 'patient_nbr'],
-    'data.exclude_pregnancy_diabetes': False,
-    'data.exclude_rows_where': {
+    'data.exclude_features.by_name': ['weight', 'payer_code', 'encounter_id', 'patient_nbr', 'A1Cresult', 'change'],
+
+    'data.exclude_rows.pregnancy_diabetes': False,
+    'data.exclude_rows.duplicate': ['patient_nbr'],
+    'data.exclude_rows.where': {
         'discharge_disposition_id': [11, 13, 14, 19, 20, 21],
         'gender': ['Unknown/Invalid'],
     },
 
     'data.bias_thresh': 0.95,
-    'data.rare_to_other_features': ['medical_specialty'],
-    'data.rare_to_other_thresh': 0.01,
 
-    'data.recategorize': {
+    'data.categories.group_others': {
+        'medial_specialty': ['InternalMedicine', 'Emergency/Trauma', 'Family/GeneralPractice',
+                             'Cardiology', 'Surgery-General', 'Nephrology', 'Orthopedics'],
+        'race': ['AfricanAmerican', 'Caucasian']
+    },
+
+    'data.categories.reduce': {
         'readmitted': {
             'YES': ['<30'],
             'NO': ['>30', 'NO']
@@ -54,10 +63,6 @@ _config = {
             '<30': ['[0-10)', '[10-20)', '[20-30)'],
             '30-60': ['[30-40)', '[40-50)', '[50-60)'],
             '>60': ['[60-70)', '[70-80)', '[80-90)', '[90-100)']
-        },
-        'race': {
-            'AfricanAmerican': ['AfricanAmerican'],
-            'Caucasian': ['Caucasian']
         },
         'admission_type_id': {
             'HighPriority': [1, 2],
@@ -68,10 +73,6 @@ _config = {
         }
     }
 }
-
-
-def get_config() -> Dict:
-    return deepcopy(_config)
 
 
 def get_config_id(config: Dict) -> str:
