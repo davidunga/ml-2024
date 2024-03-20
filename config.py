@@ -28,6 +28,22 @@ _config = {
         'num_nonEm_visits': ['number_outpatient', 'number_inpatient']
     },
 
+    'data.add_features.by_count': [
+        {
+            "values_to_count": ["No"],
+            "invert": True,
+            "drop_originals": True,
+            "mapping": {
+                "biguanides": ["metformin", "glyburide-metformin", "glimepiride-pioglitazone", "metformin-rosiglitazone"],
+                "meglitinides": ["repaglinide", "nateglinide"],
+                "sulfonylureas": ["chlorpropamide", "glimepiride", "acetohexamide", "glipizide", "glyburide", "tolbutamide"],
+                "thiazolidinediones": ["pioglitazone", "rosiglitazone", "troglitazone"],
+                "alpha-glucosidase inhibitors": ["acarbose", "miglitol"],
+                "miscellaneous": ["tolazamide", "examide", "citoglipton", "glipizide-metformin", "metformin-pioglitazone"]
+            }
+        }
+    ],
+
     'data.add_features.by_normalize': {
         'time_in_hospital': (['num_lab_procedures', 'num_procedures', 'num_medications'], 'perDay')
     },
@@ -49,7 +65,7 @@ _config = {
     'data.bias_thresh': 0.95,
 
     'data.categories.group_others': {
-        'medial_specialty': ['InternalMedicine', 'Emergency/Trauma', 'Family/GeneralPractice',
+        'medical_specialty': ['InternalMedicine', 'Emergency/Trauma', 'Family/GeneralPractice',
                              'Cardiology', 'Surgery-General', 'Nephrology', 'Orthopedics'],
         'race': ['AfricanAmerican', 'Caucasian']
     },
@@ -73,6 +89,10 @@ _config = {
         }
     }
 }
+
+
+def get_config() -> Dict:
+    return deepcopy(_config)
 
 
 def get_config_id(config: Dict) -> str:

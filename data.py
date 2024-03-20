@@ -8,7 +8,7 @@ from data_transformers import \
     ColumnTypeSetter, FeatureRemoverByBias, FeatureRemoverByName, \
     RowRemoverByFeatureValue, CategoryReducer, XySplitter, ICDConverter, \
     OneHotConverter, CategoryGroupOthers, Balancer, Standardizer, RowRemoverByDuplicates, \
-    AddFeatureAverageAge, AddFeatureByNormalizing, AddFeatureBySumming, AddFeatureEncounter
+    AddFeatureAverageAge, AddFeatureByNormalizing, AddFeatureBySumming, AddFeatureEncounter, AddFeatureByCounting
 
 
 TARGET_COL = 'readmitted'
@@ -30,12 +30,19 @@ def build_pipeline(config: Dict, verbose: int = 1) -> Pipeline:
 
     steps.append(AddFeatureBySumming(config['data.add_features.by_sum']))
 
-    if config['data.add_features.create.average_age']:
+    if config['data.add_features.construct']['average_age']:
         steps.append(AddFeatureAverageAge(age_group_col='age'))
-    if config['data.add_features.create.encounter']:
+    if config['data.add_features.construct']['encounter']:
         steps.append(AddFeatureEncounter())
 
-    steps.append(FeatureRemoverByName(features_to_remove=config['data.exclude_features.by_name']))
+    features_to_remove = config['data.exclude_features.by_name']
+
+    for kws in config['data.add_features.by_count']:
+        for (new_feature, features) in kws['mapping'].items():
+            steps.append(AddFeatureByCounting(features=features, new_feature=new_feature,
+                                              values_to_count=kws['values_to_count'], invert=kws['invert']))
+            if kws['drop_originals']:
+                features_to_remove += features
 
     # ----
     # Reduce/group CATEGORIES:
@@ -62,6 +69,8 @@ def build_pipeline(config: Dict, verbose: int = 1) -> Pipeline:
     # ----
     # Finalize:
 
+    steps.append(FeatureRemoverByName(features_to_remove=features_to_remove))
+
     # set column types to be either categorical or numeric
     steps.append(ColumnTypeSetter(exclude=NUMERIC_COLS))
 
@@ -69,7 +78,7 @@ def build_pipeline(config: Dict, verbose: int = 1) -> Pipeline:
     steps.append(XySplitter(target_col=TARGET_COL))
 
     # standardize numeric features
-    steps.append(Standardizer(**config['data.standardize']))
+    #steps.append(Standardizer(**config['data.standardize']))
 
     # balance & convert to one-hot
     balancer = Balancer(method=config['balance.method'], params=config['balance.params'])

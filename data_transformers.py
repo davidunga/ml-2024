@@ -27,7 +27,7 @@ class DataTransformer(BaseEstimator, TransformerMixin):
     @property
     def name(self):
         name = self.__class__.__name__
-        for attr in ['feature', 'method']:
+        for attr in ['feature', 'method', 'new_feature']:
             if hasattr(self, attr):
                 name += f"[{getattr(self, attr)}]"
         return name
@@ -44,6 +44,8 @@ class Standardizer(DataTransformer):
         self.transforms = {}
 
     def fit(self, X: pd.DataFrame):
+        if isinstance(X, tuple):
+            X = X[0]
         inlier_range = [100 * self.outlier_p, 100 * (1 - self.outlier_p)]
         for feature in numerical_cols(X):
             x = X[feature].to_numpy()
@@ -375,6 +377,27 @@ class AddFeatureBySumming(DataTransformer):
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         for new_feature, features in self.features_to_sum.items():
             X[new_feature] = X[features].sum(axis=1)
+        return X
+
+
+class AddFeatureByCounting(DataTransformer):
+    """ Create feature by counting value(s) occurrences in a subset of features """
+
+    def __init__(self, features: List[str], values_to_count: List, new_feature: str, invert: bool):
+        """
+            features: list of features to count in
+            values_to_count: list of values to count
+            new_feature: name of new feature to create
+            invert: if True, count how many times value does not appear
+        """
+        self.features = features
+        self.values_to_count = values_to_count
+        self.new_feature = new_feature
+        self.invert = invert
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        counts = X[self.features].isin(self.values_to_count).sum(axis=1)
+        X[self.new_feature] = counts if not self.invert else len(self.features) - counts
         return X
 
 
