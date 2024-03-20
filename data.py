@@ -38,11 +38,10 @@ def build_pipeline(config: Dict, verbose: int = 1) -> Pipeline:
     features_to_remove = config['data.exclude_features.by_name']
 
     for kws in config['data.add_features.by_count']:
-        for (new_feature, features) in kws['mapping'].items():
-            steps.append(AddFeatureByCounting(features=features, new_feature=new_feature,
-                                              values_to_count=kws['values_to_count'], invert=kws['invert']))
-            if kws['drop_originals']:
-                features_to_remove += features
+        steps.append(AddFeatureByCounting(mapping=kws['mapping'],
+                                          values_to_count=kws['values_to_count'], invert=kws['invert']))
+        if kws['drop_originals']:
+            features_to_remove += [v for vs in kws['mapping'].values() for v in vs]
 
     # ----
     # Reduce/group CATEGORIES:

@@ -383,21 +383,20 @@ class AddFeatureBySumming(DataTransformer):
 class AddFeatureByCounting(DataTransformer):
     """ Create feature by counting value(s) occurrences in a subset of features """
 
-    def __init__(self, features: List[str], values_to_count: List, new_feature: str, invert: bool):
+    def __init__(self, mapping: Dict, values_to_count: List, invert: bool):
         """
-            features: list of features to count in
+            mapping: dict of form {new_feature: features_to_count_in}
             values_to_count: list of values to count
-            new_feature: name of new feature to create
             invert: if True, count how many times value does not appear
         """
-        self.features = features
+        self.mapping = mapping
         self.values_to_count = values_to_count
-        self.new_feature = new_feature
         self.invert = invert
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        counts = X[self.features].isin(self.values_to_count).sum(axis=1)
-        X[self.new_feature] = counts if not self.invert else len(self.features) - counts
+        for (new_feature, features) in self.mapping.items():
+            counts = X[features].isin(self.values_to_count).sum(axis=1)
+            X[new_feature] = counts if not self.invert else len(features) - counts
         return X
 
 
