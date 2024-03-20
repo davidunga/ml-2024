@@ -10,13 +10,13 @@ from scipy.stats import shapiro
 from typing import List, Dict, Tuple
 from copy import deepcopy
 
+
 def categorical_cols(df: pd.DataFrame):
     return df.select_dtypes(include=['category']).columns
 
 
 def numerical_cols(df: pd.DataFrame):
     return df.select_dtypes(include=['number']).columns
-
 
 
 class DataTransformer(BaseEstimator, TransformerMixin):
@@ -44,6 +44,7 @@ class Standardizer(DataTransformer):
         self.transforms = {}
 
     def fit(self, X: pd.DataFrame):
+        inlier_range = [100 * self.outlier_p, 100 * (1 - self.outlier_p)]
         for feature in numerical_cols(X):
             x = X[feature].to_numpy()
             best_normality_score = 0
@@ -55,16 +56,20 @@ class Standardizer(DataTransformer):
                 normality_score = shapiro(x_transformed).statistic
                 if normality_score > best_normality_score:
                     best_normality_score = normality_score
-                    self.transforms[feature] = (tform, np.mean(x_transformed), np.std(x_transformed))
+                    center = np.median(x_transformed)
+                    x_transformed -= center
+                    scale = np.median(np.abs(x_transformed))
+                    x_transformed /= scale
+                    clip_lims = np.percentile(x_transformed, inlier_range)
+                    self.transforms[feature] = (tform, center, scale, clip_lims)
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        inlier_range = [100 * self.outlier_p, 100 * (1 - self.outlier_p)]
-        for feature, (tform, mean, sd) in self.transforms.items():
+        for feature, (tform, center, scale, clip_lims) in self.transforms.items():
             func = self.TRANSFORMS[tform]
             x = func(X[feature].to_numpy())
-            x = (x - mean) / sd + self.offset
-            X[feature] = np.clip(x, *np.percentile(x, inlier_range))
+            x = (x - center) / scale + self.offset
+            X[feature] = np.clip(x, *clip_lims)
         return X
 
 
@@ -79,6 +84,9 @@ class Balancer(DataTransformer):
                                       {'random_state': 1, 'cv': 5, 'estimator': LogisticRegression()}),
         'SMOTENC': (imbl.over_sampling.SMOTENC, {'categorical_features': 'auto'})
     }
+
+    # SDV
+
     CATEGORICAL_METHODS = ('SMOTENC',)
 
     def __init__(self, method: str, params: Dict = None):
@@ -113,17 +121,14 @@ class ReplaceValueToNan(DataTransformer):
         return X.replace(self.value, np.nan)
 
 
-class SetRaresToOther(DataTransformer):
+class CategoryGroupOthers(DataTransformer):
 
-    def __init__(self, thresh: float, features: List):
-        self.thresh = thresh
-        self.features = features
+    def __init__(self, nonother: Dict):
+        self.nonother = nonother
 
     def transform(self, X):
-        for col in self.features:
-            parts = X[col].value_counts(normalize=True)
-            small_parts = parts[parts < self.thresh].index
-            X.loc[X[col].isin(small_parts), col] = 'Other'
+        for col in self.nonother:
+            X.loc[~X[col].isin(self.nonother[col]), col] = 'Other'
         return X
 
 
@@ -183,14 +188,16 @@ class FeatureRemoverByBias(DataTransformer):
     def __init__(self, thresh: float = .95):
         self.thresh = thresh
         self.bias_scores = {}
+        self.features_to_keep = []
 
     def fit(self, X, y=None):
         self.bias_scores = {col: max(X[col].value_counts(normalize=True))
                             for col in X.columns}
+        self.features_to_keep = [col for col, bias in self.bias_scores.items() if bias < self.thresh]
         return self
 
     def transform(self, X):
-        return X[[col for col, bias in self.bias_scores.items() if bias < self.thresh]]
+        return X[self.features_to_keep]
 
 
 class CategoryReducer(DataTransformer):
@@ -371,12 +378,11 @@ class AddFeatureBySumming(DataTransformer):
         return X
 
 
-class SetEncounter(DataTransformer):
+class AddFeatureEncounter(DataTransformer):
 
     def transform(self, X):
         X['encounter'] = 'None'
         X.loc[X['A1Cresult'].isin(('>7', '>8')), 'encounter'] = '7_No'
         X.loc[X['A1Cresult'].isin(('>7', '>8')) & (X['change'] == 'Ch'), 'encounter'] = '7_Ch'
         X.loc[X['A1Cresult'] == 'Norm', 'encounter'] = 'Norm'
-        X.drop(columns=['A1Cresult', 'change'], inplace=True)
         return X
