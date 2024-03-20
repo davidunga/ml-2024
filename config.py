@@ -34,12 +34,13 @@ _config = {
             "invert": True,
             "drop_originals": True,
             "mapping": {
-                "biguanides": ["metformin", "glyburide-metformin", "glimepiride-pioglitazone", "metformin-rosiglitazone"],
-                "meglitinides": ["repaglinide", "nateglinide"],
-                "sulfonylureas": ["chlorpropamide", "glimepiride", "acetohexamide", "glipizide", "glyburide", "tolbutamide"],
-                "thiazolidinediones": ["pioglitazone", "rosiglitazone", "troglitazone"],
-                "alpha-glucosidase inhibitors": ["acarbose", "miglitol"],
-                "miscellaneous": ["tolazamide", "examide", "citoglipton", "glipizide-metformin", "metformin-pioglitazone"]
+                "biguanides_and_related": ["metformin", "glyburide-metformin", "glimepiride-pioglitazone",
+                                           "metformin-rosiglitazone"],
+                "sulfonylureas_and_meglitinides": ["repaglinide", "nateglinide", "chlorpropamide", "glimepiride",
+                                                   "acetohexamide", "glipizide", "glyburide", "tolbutamide"],
+                "thiazolidinediones_and_miscellaneous": ["pioglitazone", "rosiglitazone", "troglitazone", "acarbose",
+                                                         "miglitol", "tolazamide", "examide", "citoglipton",
+                                                         "glipizide-metformin", "metformin-pioglitazone"]
             }
         }
     ],
