@@ -1,7 +1,7 @@
 from sklearn.experimental import enable_halving_search_cv  # required
 from sklearn.model_selection import GridSearchCV, HalvingGridSearchCV, RandomizedSearchCV, StratifiedKFold
 import paths
-from data import load_data, build_pipeline, DataSplitter
+from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
 from config import get_config, get_config_id
 import pandas as pd
 from typing import Dict, List, Tuple
@@ -10,7 +10,7 @@ import lightgbm as lgb
 import catboost as catb
 import numpy as np
 import cv_result_manager
-
+from pipe_cross_val import set_pipecv
 
 grids = {
     'XGB': {
@@ -52,27 +52,29 @@ grids = {
 }
 
 
-def _get_best_iteration(clf):
+def get_best_iteration(estimator):
     for attr in ['best_iteration', 'best_iteration_', '_best_iteration']:
-        if hasattr(clf, attr):
-            return getattr(clf, attr)
-    assert AttributeError()
+        if hasattr(estimator, attr):
+            return getattr(estimator, attr)
+    assert AttributeError("Estimator doesnt have best iteration attribute")
 
 
 def tune(config: Dict):
 
     cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'],
-               'verbose': 0, 'refit': config['cv.main_score'], 'return_train_score': True, 'n_jobs': -1}
+               'verbose': 0, 'refit': config['cv.main_score'],
+               'return_train_score': True, 'n_jobs': -1}
 
     random_state = config['random_state']
 
-    pipe = build_pipeline(config, verbose=2)
     raw_data = load_data(config)
-    Xy = pipe.fit_transform(raw_data)
+    prep_pipe = build_data_prep_pipe(config)
+    Xy = prep_pipe.fit_transform(raw_data)
+    cv_pipe = build_cv_pipe(config, Xy)
 
-    data_splitter = DataSplitter(random_state=random_state, shuffle=True, stratify=True)
-    Xy_train, Xy_test = data_splitter.split(Xy, test_size=config['data.test_size'])
-    Xy_base_train, Xy_base_val = data_splitter.split(Xy_train, test_size=config['cv.base.val_size'])
+    Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], random_state=random_state)
+    Xy_base_train, Xy_base_val = stratified_split(Xy_train, test_size=config['cv.base.val_size'], random_state=random_state)
+    Xy_base_val = cv_pipe.fit(Xy_base_train).transform(Xy_base_val)
 
     for model_name in grids:
 
@@ -86,23 +88,33 @@ def tune(config: Dict):
             base_grid = _reduce_grid(base_grid)
             fine_grid = _reduce_grid(fine_grid)
 
-        model = estimator_class(early_stopping_rounds=config['cv.base.early_stopping_rounds'],
-                                random_state=random_state)
+        # -----
+        # base:
 
-        # find best base params:
-        print(model_name, "- Searching for best base params...")
-        cv = GridSearchCV(model, param_grid=base_grid, **cv_args)
+        cv = GridSearchCV(estimator_class(
+            early_stopping_rounds=config['cv.base.early_stopping_rounds'],
+            random_state=random_state), param_grid=base_grid, **cv_args)
+        set_pipecv(cv, cv_pipe)
+
         cv.fit(*Xy_base_train, eval_set=[Xy_base_val])
+
         params = cv.best_params_
-        params['n_estimators'] = _get_best_iteration(cv.best_estimator_)
+        params['n_estimators'] = get_best_iteration(cv.best_estimator_)
+
         print(model_name + ":")
         print(" Best base params:", params)
         print(" Score:", cv.best_score_)
 
+        # -----
         # fine tune:
+
         print(model_name, "- Fine tuning...")
-        model = estimator_class(**params, random_state=random_state)
-        cv = GridSearchCV(model, param_grid=fine_grid, **cv_args)
+
+        cv = GridSearchCV(
+            estimator_class(**params, random_state=random_state),
+            param_grid=fine_grid, **cv_args)
+        set_pipecv(cv, cv_pipe)
+
         cv.fit(*Xy_train)
 
         print(model_name + ":")

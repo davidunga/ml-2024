@@ -5,12 +5,14 @@ from typing import Dict, List, Tuple
 
 _config = {
 
+    'target_col': 'readmitted',
+    'diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
+
     'random_state': 1337,
 
     'data.sanity_mode': 'none',
     'data.test_size': .2,
 
-    'cv.n_seeds': 5,
     'cv.n_folds': 5,
     'cv.scores': ['balanced_accuracy', 'roc_auc', 'f1', 'precision', 'recall'],
     'cv.main_score': 'roc_auc',
@@ -19,9 +21,14 @@ _config = {
     'cv.base.early_stopping_rounds': 5,
 
     'balance.method': 'RandomUnderSampler',
-    'balance.params': {'random_state': 1},
+    'balance.params': {'random_state': 1337},
 
-    'data.standardize': {'outlier_p': .01, 'offset': .5},
+    'data.standardize': {
+        'default_transform': 'sqrt',
+        'feature_transforms': {},
+        'outlier_p': .01,
+        'offset': .5
+    },
 
     'data.add_features.by_sum': {
         'num_visits': ['number_outpatient', 'number_inpatient', 'number_emergency'],
@@ -34,13 +41,16 @@ _config = {
             "invert": True,
             "drop_originals": True,
             "mapping": {
-                "biguanides_and_related": ["metformin", "glyburide-metformin", "glimepiride-pioglitazone",
-                                           "metformin-rosiglitazone"],
-                "sulfonylureas_and_meglitinides": ["repaglinide", "nateglinide", "chlorpropamide", "glimepiride",
-                                                   "acetohexamide", "glipizide", "glyburide", "tolbutamide"],
-                "thiazolidinediones_and_miscellaneous": ["pioglitazone", "rosiglitazone", "troglitazone", "acarbose",
-                                                         "miglitol", "tolazamide", "examide", "citoglipton",
-                                                         "glipizide-metformin", "metformin-pioglitazone"]
+                "biguanides_and_related": [
+                    "metformin", "glyburide-metformin", "glimepiride-pioglitazone",
+                    "metformin-rosiglitazone"],
+                "sulfonylureas_and_meglitinides": [
+                    "repaglinide", "nateglinide", "chlorpropamide", "glimepiride",
+                    "acetohexamide", "glipizide", "glyburide", "tolbutamide"],
+                "thiazolidinediones_and_miscellaneous": [
+                    "pioglitazone", "rosiglitazone", "troglitazone", "acarbose",
+                    "miglitol", "tolazamide", "examide", "citoglipton",
+                    "glipizide-metformin", "metformin-pioglitazone"]
             }
         }
     ],
@@ -54,7 +64,8 @@ _config = {
         'encounter': True
     },
 
-    'data.exclude_features.by_name': ['weight', 'payer_code', 'encounter_id', 'patient_nbr', 'A1Cresult', 'change'],
+    'data.exclude_features.by_name': ['weight', 'payer_code', 'encounter_id',
+                                      'patient_nbr', 'A1Cresult', 'change'],
 
     'data.exclude_rows.pregnancy_diabetes': False,
     'data.exclude_rows.duplicate': ['patient_nbr'],
@@ -67,7 +78,7 @@ _config = {
 
     'data.categories.group_others': {
         'medical_specialty': ['InternalMedicine', 'Emergency/Trauma', 'Family/GeneralPractice',
-                             'Cardiology', 'Surgery-General', 'Nephrology', 'Orthopedics'],
+                              'Cardiology', 'Surgery-General', 'Nephrology', 'Orthopedics'],
         'race': ['AfricanAmerican', 'Caucasian']
     },
 

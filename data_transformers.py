@@ -3,20 +3,18 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, PowerTransformer
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder, PowerTransformer
 from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
-from scipy.stats import shapiro
 from typing import List, Dict, Tuple
 from copy import deepcopy
 
 
-def categorical_cols(df: pd.DataFrame):
-    return df.select_dtypes(include=['category']).columns
-
-
-def numerical_cols(df: pd.DataFrame):
-    return df.select_dtypes(include=['number']).columns
+def unpack_args(X, y):
+    if isinstance(X, tuple):
+        assert y is None and len(X) == 2
+        return X
+    return X, y
 
 
 class DataTransformer(BaseEstimator, TransformerMixin):
@@ -36,43 +34,45 @@ class DataTransformer(BaseEstimator, TransformerMixin):
 class Standardizer(DataTransformer):
     """ Transform numeric features to be approximately normal and remove outliers """
 
-    TRANSFORMS = {'none': lambda x: x, 'sqrt': np.sqrt}
+    TRANSFORMS = {'none': lambda x: x.astype(float), 'sqrt': np.sqrt}
 
-    def __init__(self, outlier_p: float = .05, offset: float = 0):
+    def __init__(self, default_transform: str, feature_transforms: Dict[str, str],
+                 outlier_p: float = .05, offset: float = 0):
         self.outlier_p = outlier_p
         self.offset = offset
-        self.transforms = {}
+        self.default_transform = default_transform
+        self.feature_transforms = feature_transforms
+        self.standardize_params = {}
 
-    def fit(self, X: pd.DataFrame):
-        if isinstance(X, tuple):
-            X = X[0]
+    def fit(self, Xy, y=None, **kwargs):
+        X, y = unpack_args(Xy, y)
         inlier_range = [100 * self.outlier_p, 100 * (1 - self.outlier_p)]
-        for feature in numerical_cols(X):
-            x = X[feature].to_numpy()
-            best_normality_score = 0
-            for tform, func in self.TRANSFORMS.items():
-                try:
-                    x_transformed = func(x)
-                except:
-                    continue
-                normality_score = shapiro(x_transformed).statistic
-                if normality_score > best_normality_score:
-                    best_normality_score = normality_score
-                    center = np.median(x_transformed)
-                    x_transformed -= center
-                    scale = np.median(np.abs(x_transformed))
-                    x_transformed /= scale
-                    clip_lims = np.percentile(x_transformed, inlier_range)
-                    self.transforms[feature] = (tform, center, scale, clip_lims)
+        for feature in X.select_dtypes('number').columns:
+            tform = self.feature_transforms.get(feature, self.default_transform)
+            func = self.TRANSFORMS[tform]
+            x = X[feature].to_numpy(dtype=float)
+            x = func(x)
+            center = np.mean(x)
+            scale = np.std(x)
+            x = self._apply_transform(x, tform, center, scale)
+            clip_lims = np.percentile(x, inlier_range)
+            self.standardize_params[feature] = (tform, center, scale, clip_lims)
         return self
 
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        for feature, (tform, center, scale, clip_lims) in self.transforms.items():
-            func = self.TRANSFORMS[tform]
-            x = func(X[feature].to_numpy())
-            x = (x - center) / scale + self.offset
-            X[feature] = np.clip(x, *clip_lims)
-        return X
+    def _apply_transform(self, x, tform, center, scale, clip_lims=None):
+        func = self.TRANSFORMS[tform]
+        x = func(x)
+        x = (x - center) / scale
+        x += self.offset
+        if clip_lims is not None:
+            x = np.clip(x, *clip_lims)
+        return x
+
+    def transform(self, Xy, y=None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        X = Xy[0].copy()
+        for feature, (tform, center, scale, clip_lims) in self.standardize_params.items():
+            X[feature] = self._apply_transform(X[feature].to_numpy(), tform, center, scale, clip_lims)
+        return X, Xy[1]
 
 
 class Balancer(DataTransformer):
@@ -96,6 +96,7 @@ class Balancer(DataTransformer):
         method: method name, must me key of METHODS
         params: override params specified in METHODS. keys that do not appear in METHODS params are ignored.
         """
+        self.params = params
         self.method = method
         sampler_type, sampler_params = Balancer.METHODS[method]
         if params:
@@ -107,11 +108,11 @@ class Balancer(DataTransformer):
         """ does transformer expect categorical (dataframe) input? """
         return self.method in Balancer.CATEGORICAL_METHODS
 
-    def fit_transform(self, Xy, *args):
-        return self._sampler.fit_resample(Xy[0], Xy[1])
+    def fit_transform(self, Xy, y=None, **kwargs):
+        return self._sampler.fit_resample(*unpack_args(Xy, y), **kwargs)
 
-    def fit(self, *args): raise AssertionError("Only fit_transform should be called")
-    def transform(self, *args): raise AssertionError("Only fit_transform should be called")
+    def transform(self, Xy, **kwargs):
+        return Xy
 
 
 class ReplaceValueToNan(DataTransformer):
@@ -254,22 +255,15 @@ class CategoryReducer_with_other(DataTransformer):
         return X
 
 
-
-
-
 class ColumnTypeSetter(DataTransformer):
-
-    def __init__(self, type_: str = 'category', exclude: List[str] = None):
-        self.type_ = type_
-        self.exclude = exclude if exclude else []
-
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        for col in set(X.columns).difference(self.exclude):
-            X[col] = X[col].astype(self.type_)
+        non_numeric_cols = X.select_dtypes(exclude=['number']).columns
+        for col in non_numeric_cols:
+            X[col] = X[col].astype('category')
         return X
 
 
-class XySplitter(DataTransformer):
+class TargetSeparator(DataTransformer):
     """ Split dataframe to X, y dataframes """
 
     def __init__(self, target_col: str, sanity_mode: str = 'none'):
@@ -330,42 +324,55 @@ class OneHotConverter(DataTransformer):
         self.reverse_feature_names = []
         pass
 
-    def fit(self, Xy: Tuple[pd.DataFrame, pd.DataFrame]):
-
+    def fit(self, Xy, y=None):
+        X, y = unpack_args(Xy, y)
         sep = "."
 
         def _combinator(feature, category):
             return f"{feature}{sep}{str(category)}"
 
-        onehot_encoder = OneHotEncoder(handle_unknown="error", feature_name_combiner=_combinator)
+        onehot_encoder = OneHotEncoder(handle_unknown="error", feature_name_combiner=_combinator, sparse_output=False)
+        cat_cols = X.select_dtypes('category').columns
         self._feature_transformer = ColumnTransformer(
             remainder='passthrough',
-            transformers=[(self.name, Pipeline(steps=[(self.name, onehot_encoder)]), categorical_cols(Xy[0]))]
+            transformers=[(self.name, Pipeline(steps=[(self.name, onehot_encoder)]), cat_cols)]
         )
-        self._feature_transformer.fit(Xy[0])
-        self._label_transformer.fit(Xy[1])
+        self._feature_transformer.fit(X)
+        self._label_transformer.fit(y)
         self.reverse_feature_names = [s.split('__')[-1].split(sep)[0]
                                       for s in self._feature_transformer.get_feature_names_out()]
 
         return self
 
-    def transform(self, Xy: Tuple[pd.DataFrame, pd.DataFrame]) -> Tuple[np.ndarray, np.ndarray]:
-        X = self._feature_transformer.transform(Xy[0])
-        y = self._label_transformer.transform(Xy[1])
+    def fit_transform(self, Xy, y=None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+        return self.transform(*unpack_args(Xy, y))
+
+    def transform(self, Xy, y=None) -> Tuple[np.ndarray, np.ndarray]:
+        X, y = unpack_args(Xy, y)
+        X = self._feature_transformer.transform(X)
+        y = self._label_transformer.transform(y)
         return X, y
 
 
 class AddFeatureByNormalizing(DataTransformer):
 
-    def __init__(self, to_normalize: List[str], normalize_by: str, suffix: str = "norm"):
-        self.to_normalize = to_normalize
-        self.normalize_by = normalize_by
-        self.suffix = suffix
+    def __init__(self, mapping: Dict[str, Tuple[List[str], str]]):
+        """
+        mapping: dict of the form-
+            feature_to_normalize_by -> (list_of_features_to_normalize, suffix_for_new_feature_name)
+
+        each feature in [list_of_features_to_normalize] will be normalized by [feature_to_normalize_by] and
+        added as a feature called <feature_name>_[suffix]
+        """
+        self.mapping = mapping
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        for feature in self.to_normalize:
-            new_feature = f"{feature}_{self.suffix}"
-            X[new_feature] = X[feature].to_numpy() / (1e-6 + X[self.normalize_by].to_numpy())
+        for by, (features, suffix) in self.mapping.items():
+            factor = X[by].to_numpy(dtype=float)
+            mask = np.abs(factor) > np.finfo(float).eps
+            for feature in features:
+                new_feature = f"{feature}_{suffix}"
+                X[new_feature] = np.divide(X[feature].to_numpy(), factor, out=np.zeros_like(factor), where=mask)
         return X
 
 
