@@ -15,6 +15,7 @@ _config = {
                      'number_inpatient', 'number_diagnoses', 'weight'],
 
     'random_state': 1337,
+    'finetune': False,
 
     'estimator.name': '',
     'estimator.params': {},
@@ -137,6 +138,8 @@ def get_config_name(config: Dict) -> str:
 
     name = f"{estimator_name} {config['balance']['method']} seed{config['random_state']}"
     name += f" params{params_hash} {total_hash}"
+    if config['finetune']:
+        name += " TUNED"
 
     return name
 

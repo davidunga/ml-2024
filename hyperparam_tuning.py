@@ -22,6 +22,8 @@ config_grid = {
 }
 
 balance_grid = {
+    'none': {
+    },
     'RandomUnderSampler': {
         'random_state': [FROM_CONFIG],
     },
@@ -45,8 +47,8 @@ model_grids = {
     'XGB': {
         'estimator': xgb.XGBClassifier,
         'base_grid': {
-            'max_depth': np.arange(3, 5),
-            'learning_rate': np.linspace(0.01, 0.1, 5)
+            'max_depth': np.arange(3, 10),
+            'learning_rate': np.array([1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 1e-1])
         },
         'fine_grid': {
             'min_child_weight': [1, 3, 5, 7, 10],
@@ -60,8 +62,8 @@ model_grids = {
     'LGB': {
         'estimator': lgb.LGBMClassifier,
         'base_grid': {
-            'max_depth': np.arange(3, 5),
-            'learning_rate': np.linspace(0.01, 0.1, 5)
+            'max_depth': np.arange(3, 10),
+            'learning_rate': np.array([1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 1e-1])
         },
         'fine_grid': {
             'min_child_weight': [1, 3, 5, 7, 10],
@@ -71,8 +73,8 @@ model_grids = {
     'CATB': {
         'estimator': catb.CatBoostClassifier,
         'base_grid': {
-            'max_depth': np.arange(3, 5),
-            'learning_rate': np.linspace(0.01, 0.1, 5)
+            'max_depth': np.arange(3, 10),
+            'learning_rate': np.array([1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 1e-1])
         },
         'fine_grid': {
             'bagging_temperature': [0, .5, 1, 5],
@@ -99,8 +101,10 @@ def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
         yield result
 
 
-def search_model_and_config():
-    for config in yield_from_grid(grid_dict=config_grid, default_dict=get_config()):
+def search_model_and_config(finetune: bool):
+    default_config = get_config()
+    default_config['finetune'] = finetune
+    for config in yield_from_grid(grid_dict=config_grid, default_dict=default_config):
 
         for balance_method, balance_params_grid in balance_grid.items():
             for balance_params in yield_from_grid(balance_params_grid):
@@ -162,23 +166,26 @@ def search_model(config: Dict):
         # -----
         # fine tune:
 
-        print(model_name, "- Fine tuning...")
+        if config['finetune']:
 
-        cv = GridSearchCV(
-            estimator_class(**params, random_state=seed),
-            param_grid=fine_grid, **cv_args)
-        set_pipecv(cv, cv_pipe)
+            print(model_name, "- Fine tuning...")
 
-        cv.fit(*Xy_train)
+            cv = GridSearchCV(
+                estimator_class(**params, random_state=seed),
+                param_grid=fine_grid, **cv_args)
+            set_pipecv(cv, cv_pipe)
 
-        params = {**cv.best_params_, **params}
+            cv.fit(*Xy_train)
+
+            params = {**cv.best_params_, **params}
+            print(model_name + ":")
+            print(" Best fine-tuned params:", cv.best_params_)
+            print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
+
+        # -----
+        # finalize
 
         fitted_config = update_estimator_in_config(config, model_name, params)
-
-        print(model_name + ":")
-        print(" Best fine-tuned params:", cv.best_params_)
-        print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
-
         cv_result_manager.process_result(fitted_config, cv)
 
 
@@ -187,4 +194,4 @@ def _reduce_grid(grid: Dict) -> Dict:
 
 
 if __name__ == "__main__":
-    search_model_and_config()
+    search_model_and_config(finetune=False)
