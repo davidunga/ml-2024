@@ -158,15 +158,16 @@ class Balancer(DataTransformer):
         self.method = method
         self.params = params
         self._sampler_class = None
+        if self.method != 'none':
 
-        for imbl_module in [imbl.under_sampling, imbl.over_sampling, imbl.combine]:
-            if hasattr(imbl_module, self.method):
-                self._sampler_class = getattr(imbl.under_sampling, self.method)
-                break
-        if self._sampler_class is None:
-            raise ValueError("Unknown sampling method")
+            for imbl_module in [imbl.under_sampling, imbl.over_sampling, imbl.combine]:
+                if hasattr(imbl_module, self.method):
+                    self._sampler_class = getattr(imbl_module, self.method)
+                    break
+            if self._sampler_class is None:
+                raise ValueError("Unknown sampling method")
 
-        self._get_new_sampler()  # verify we're good to go
+            self._get_new_sampler()  # verify we're good to go
 
     def _get_new_sampler(self):
         sampler = self._sampler_class(**self.params)
@@ -182,8 +183,10 @@ class Balancer(DataTransformer):
 
     def fit_transform(self, Xy, y=None, **kwargs):
         # called on training set -- resample and forget
-        sampler = self._get_new_sampler()
-        return sampler.fit_resample(*unpack_args(Xy, y), **kwargs)
+        if self.method == 'none':
+            return unpack_args(Xy, y)
+        else:
+            return self._get_new_sampler().fit_resample(*unpack_args(Xy, y), **kwargs)
 
     def transform(self, Xy, **kwargs):
         # called on validation set -- do nothing
