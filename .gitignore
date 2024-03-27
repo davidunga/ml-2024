@@ -8,3 +8,5 @@ __pycache__/
 output/cv_results/
 
 catboost_info/
+
+output/best_models/

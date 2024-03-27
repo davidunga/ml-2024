@@ -107,7 +107,7 @@ def search_model(config: Dict):
         base_grid = model_grids[model_name]['base_grid']
         fine_grid = model_grids[model_name]['fine_grid']
 
-        DEV = True
+        DEV = False
         if DEV:
             # smaller grid for dev/debug..
             base_grid = _reduce_grid(base_grid)
@@ -115,6 +115,7 @@ def search_model(config: Dict):
 
         # -----
         # base:
+        print(model_name, "- Searching base params...")
 
         cv = GridSearchCV(estimator_class(
             early_stopping_rounds=config['cv.base.early_stopping_rounds'],
@@ -128,7 +129,7 @@ def search_model(config: Dict):
 
         print(model_name + ":")
         print(" Best base params:", params)
-        print(" Score:", cv.best_score_)
+        print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
 
         # -----
         # fine tune:
@@ -142,14 +143,17 @@ def search_model(config: Dict):
 
         cv.fit(*Xy_train)
 
-        fitted_config = update_estimator_in_config(config, model_name, params)
-        print(model_name + ":")
-        print(" Best fine-tuned params:", params)
-        print(" Score:", cv.best_score_)
+        params = {**cv.best_params_, **params}
 
-        results_df = cv_result_manager.make_dataframe(fitted_config, cv.cv_results_)
-        cv_result_manager.display(results_df)
-        cv_result_manager.save(results_df)
+        fitted_config = update_estimator_in_config(config, model_name, params)
+
+        print(model_name + ":")
+        print(" Best fine-tuned params:", cv.best_params_)
+        print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
+
+        results = cv_result_manager.make_result_dict(fitted_config, cv)
+        cv_result_manager.display(results)
+        cv_result_manager.save(results)
 
 
 def _reduce_grid(grid: Dict) -> Dict:
