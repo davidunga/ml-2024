@@ -3,6 +3,7 @@ from pathlib import Path
 import paths
 from typing import Dict, Tuple, List
 from config import get_config_name
+import json
 
 
 def display(results_df: pd.DataFrame):
@@ -22,7 +23,7 @@ def save(results_df: pd.DataFrame):
 
 
 def make_dataframe(config: Dict, cv_results: Dict) -> pd.DataFrame:
-    results_df = pd.DataFrame({"model_name": config['estimator.name'], **cv_results})
+    results_df = pd.DataFrame({"model_name": config['estimator.name'], **cv_results, "config": json.dumps(config)})
     results_df.attrs['config'] = config
     return results_df
 
