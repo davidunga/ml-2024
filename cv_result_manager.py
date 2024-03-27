@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 from pathlib import Path
 import paths
@@ -6,6 +7,15 @@ from config import get_config_name
 import json
 from sklearn.model_selection._search import BaseSearchCV
 import pickle
+from copy import deepcopy
+from glob import glob
+
+
+def process_result(config: Dict, cv: BaseSearchCV):
+    results = make_result_dict(config, cv)
+    display(results)
+    save(results)
+    refresh_bests_file()
 
 
 def make_result_dict(config: Dict, cv: BaseSearchCV) -> Dict:
@@ -42,4 +52,20 @@ def save(result_dict: Dict):
     best_model_pkl = paths.BEST_MODELS_PATH / (config_name + ".pkl")
     best_model_pkl.parent.mkdir(exist_ok=True, parents=True)
     with best_model_pkl.open('wb') as f:
-        pickle.dump(result_dict['best_estimator'], f)
+        pickle.dump({k: v for k, v in result_dict.items() if k != 'df'}, f)
+
+
+def refresh_bests_file():
+    best_txt = paths.BEST_MODELS_PATH / "best.txt"
+    files = glob(str(paths.BEST_MODELS_PATH / "*.pkl"))
+    lines = []
+    scores = []
+    for file in files:
+        with open(file, 'rb') as f:
+            res = pickle.load(f)
+        score = res['best_score']
+        lines.append(f"{Path(file).stem} - score={score:2.4f}, params={res['best_params']}")
+        scores.append(score)
+    lines = [lines[i] for i in np.argsort(scores)[::-1]]
+    with best_txt.open('w') as f:
+        f.writelines("\n".join(lines))

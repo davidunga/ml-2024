@@ -151,9 +151,7 @@ def search_model(config: Dict):
         print(" Best fine-tuned params:", cv.best_params_)
         print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
 
-        results = cv_result_manager.make_result_dict(fitted_config, cv)
-        cv_result_manager.display(results)
-        cv_result_manager.save(results)
+        cv_result_manager.process_result(fitted_config, cv)
 
 
 def _reduce_grid(grid: Dict) -> Dict:
