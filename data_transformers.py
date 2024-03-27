@@ -149,40 +149,44 @@ class Standardizer(DataTransformer):
 class Balancer(DataTransformer):
     """ wrapper for data balancing classes """
 
-    METHODS = {
-        # method_name : (sampler_type, sampler_params)
-        'RandomUnderSampler': (imbl.under_sampling.RandomUnderSampler, {'random_state': 1}),
-        'NearMiss1': (imbl.under_sampling.NearMiss, {'version': 1}),
-        'InstanceHardnessThreshold': (imbl.under_sampling.InstanceHardnessThreshold,
-                                      {'random_state': 1, 'cv': 5, 'estimator': LogisticRegression()}),
-        'SMOTENC': (imbl.over_sampling.SMOTENC, {'categorical_features': 'auto'})
-    }
+    _required_params = ['random_state']
 
-    # SDV
+    # @TODO add SDV
 
-    CATEGORICAL_METHODS = ('SMOTENC',)
+    def __init__(self, method: str, params: Dict):
 
-    def __init__(self, method: str, params: Dict = None):
-        """
-        method: method name, must me key of METHODS
-        params: override params specified in METHODS. keys that do not appear in METHODS params are ignored.
-        """
-        self.params = params
         self.method = method
-        sampler_type, sampler_params = Balancer.METHODS[method]
-        if params:
-            sampler_params = {k: params.get(k, v) for k, v in sampler_params.items()}
-        self._sampler = sampler_type(**sampler_params)
+        self.params = params
+        self._sampler_class = None
+
+        for imbl_module in [imbl.under_sampling, imbl.over_sampling, imbl.combine]:
+            if hasattr(imbl_module, self.method):
+                self._sampler_class = getattr(imbl.under_sampling, self.method)
+                break
+        if self._sampler_class is None:
+            raise ValueError("Unknown sampling method")
+
+        self._get_new_sampler()  # verify we're good to go
+
+    def _get_new_sampler(self):
+        sampler = self._sampler_class(**self.params)
+        for param in self._required_params:
+            if hasattr(sampler, param) and param not in self.params:
+                raise ValueError(f"Missing required parameter: {param}")
+        return sampler
 
     @property
     def is_categorical(self) -> bool:
         """ does transformer expect categorical (dataframe) input? """
-        return self.method in Balancer.CATEGORICAL_METHODS
+        return self.method in ('SMOTENC',)
 
-    def _fit_transform(self, Xy, y=None, **kwargs):
-        return self._sampler.fit_resample(*unpack_args(Xy, y), **kwargs)
+    def fit_transform(self, Xy, y=None, **kwargs):
+        # called on training set -- resample and forget
+        sampler = self._get_new_sampler()
+        return sampler.fit_resample(*unpack_args(Xy, y), **kwargs)
 
     def transform(self, Xy, **kwargs):
+        # called on validation set -- do nothing
         return Xy
 
 
@@ -205,16 +209,6 @@ class CategoryGroupOthers(DataTransformer):
             X.loc[~X[col].isin(self.nonother[col]), col] = 'Other'
         self.prop_setter.register(cat=list(self.nonother.keys()))
         return X
-
-
-class FeatureRemoverByName(DataTransformer):
-    """ Drop features based on feature list """
-
-    def __init__(self, features_to_remove: List):
-        self.features_to_remove = features_to_remove
-
-    def transform(self, X):
-        return X.drop(columns=self.features_to_remove, inplace=False)
 
 
 class RowRemoverByFeatureValue(DataTransformer):
@@ -259,23 +253,6 @@ class AddFeatureAverageAge(DataTransformer):
         return X
 
 
-class FeatureRemoverByBias(DataTransformer):
-
-    def __init__(self, thresh: float = .95):
-        self.thresh = thresh
-        self.bias_scores = {}
-        self.features_to_keep = []
-
-    def _fit(self, X, y=None):
-        self.bias_scores = {col: max(X[col].value_counts(normalize=True))
-                            for col in X.columns}
-        self.features_to_keep = [col for col, bias in self.bias_scores.items() if bias < self.thresh]
-        return self
-
-    def transform(self, X):
-        return X[self.features_to_keep]
-
-
 class CategoryReducer(DataTransformer):
     """ Reduce category values according to lookup
         NA values are converted to 'missing'
@@ -297,43 +274,6 @@ class CategoryReducer(DataTransformer):
         assert len(self.new_labels) == len(X)
         X[self.feature] = self.new_labels
         self.prop_setter.register(cat=[self.feature])
-        return X
-
-
-class CategoryReducer_with_other(DataTransformer):
-    """ Reduce category values according to lookup
-        NA values are converted to 'missing'
-        Values that are not in lookup are converted to 'Other'
-        if "other" is in the lookup, keys that are not defined in the lookup will not change to "Other"
-    """
-    def __init__(self, feature: str, lookup: Dict[str, List]):
-       
-        self.feature = feature
-        self.lookup = lookup
-        self.new_labels = None
-        self.keys = [str.lower(key) for key in lookup.keys()]
-
-    def _fit(self, X):
-        self.new_labels = deepcopy(X[self.feature])
-        
-        for key in self.lookup.keys():
-            self.new_labels[self.new_labels.isin(self.lookup[key])] = key
-        if not ('other' in self.keys):
-            self.new_labels[~self.new_labels.isin(self.lookup.keys())] = 'Other'
-        self.new_labels.replace(np.nan, 'Missing')
-        return self
-
-    def transform(self, X):
-        assert len(self.new_labels) == len(X)
-        X[self.feature] = self.new_labels
-        return X
-
-
-class ColumnTypeSetter(DataTransformer):
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        non_numeric_cols = X.select_dtypes(exclude=['number']).columns
-        for col in non_numeric_cols:
-            X[col] = X[col].astype('category')
         return X
 
 

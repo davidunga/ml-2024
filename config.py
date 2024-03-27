@@ -4,10 +4,15 @@ import json
 import numpy as np
 from typing import Dict, List, Tuple
 
+FROM_CONFIG = '_from_config_'
+
 _config = {
 
     'target_col': 'readmitted',
     'diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
+    'numeric_cols': ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
+                     'num_medications', 'number_outpatient', 'number_emergency',
+                     'number_inpatient', 'number_diagnoses', 'weight'],
 
     'random_state': 1337,
 
@@ -24,8 +29,10 @@ _config = {
     'cv.base.val_size': .2,
     'cv.base.early_stopping_rounds': 5,
 
-    'balance.method': 'RandomUnderSampler',
-    'balance.params': {'random_state': 1337},
+    'balance': {
+        'method': 'RandomUnderSampler',
+        'params': {'random_state': 1337}
+    },
 
     'data.standardize': {
         'default_transform': 'sqrt',
@@ -78,8 +85,6 @@ _config = {
         'gender': ['Unknown/Invalid'],
     },
 
-    'data.bias_thresh': 0.95,
-
     'data.categories.group_others': {
         'medical_specialty': ['InternalMedicine', 'Emergency/Trauma', 'Family/GeneralPractice',
                               'Cardiology', 'Surgery-General', 'Nephrology', 'Orthopedics'],
@@ -130,7 +135,12 @@ def get_config_name(config: Dict) -> str:
 
     estimator_name = 'x' if not config['estimator.name'] else config['estimator.name']
 
-    name = f"{estimator_name} {config['balance.method']} seed{config['random_state']}"
+    name = f"{estimator_name} {config['balance']['method']} seed{config['random_state']}"
     name += f" params{params_hash} {total_hash}"
 
     return name
+
+
+def inherit_from_config(d: Dict, config: Dict):
+    return {k: config[k] if (isinstance(v, str) and v == FROM_CONFIG) else v
+            for k, v in d.items()}

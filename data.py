@@ -5,22 +5,17 @@ from sklearn.model_selection import train_test_split
 from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
 from data_transformers import (
-    ColumnTypeSetter, FeatureRemoverByName,
     RowRemoverByFeatureValue, CategoryReducer, TargetSeparator, ICDConverter,
     OneHotConverter, CategoryGroupOthers, Balancer, Standardizer,
     RowRemoverByDuplicates, AddFeatureAverageAge, AddFeatureByNormalizing,
     AddFeatureBySumming, AddFeatureEncounter, AddFeatureByCounting, PropertySetter, DataTransformer
 )
 
-NUMERIC_COLS = ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
-                'num_medications', 'number_outpatient', 'number_emergency',
-                'number_inpatient', 'number_diagnoses', 'weight']
-
 
 def build_data_prep_pipe(config: Dict) -> Pipeline:
 
     prop_setter = PropertySetter(default='cat').register(
-        num=NUMERIC_COLS,
+        num=config['numeric_cols'],
         drop=config['data.exclude_features.by_name'])
 
     steps = []
@@ -30,21 +25,32 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
         steps.append(step)
 
     # ----
-    # Add/remove FEATURES:
+    # Remove ROWS:
+
+    if config['data.exclude_rows.pregnancy_diabetes']:
+        add_step(RowRemoverByFeatureValue(feature=config['diagnosis_cols'],
+                                          exclude_vals=[ICDConverter.PREGNANCY_DIABETES_ICD]))
+
+    for col, exclude_vals in config['data.exclude_rows.where'].items():
+        add_step(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
+
+    add_step(RowRemoverByDuplicates(config['data.exclude_rows.duplicate']))
+
+    # ----
+    # Add FEATURES:
 
     add_step(AddFeatureByNormalizing(config['data.add_features.by_normalize']))
     add_step(AddFeatureBySumming(config['data.add_features.by_sum']))
+    for kws in config['data.add_features.by_count']:
+        add_step(AddFeatureByCounting(**kws))
 
     if config['data.add_features.construct']['average_age']:
         add_step(AddFeatureAverageAge(age_group_col='age'))
     if config['data.add_features.construct']['encounter']:
         add_step(AddFeatureEncounter())
 
-    for kws in config['data.add_features.by_count']:
-        add_step(AddFeatureByCounting(**kws))
-
     # ----
-    # Reduce/group CATEGORIES:
+    # Regroup CATEGORIES:
 
     for col, lookup in config['data.categories.reduce'].items():
         add_step(CategoryReducer(feature=col, lookup=lookup))
@@ -52,18 +58,6 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
     add_step(CategoryGroupOthers(config['data.categories.group_others']))
 
     add_step(ICDConverter(features=config['diagnosis_cols']))
-
-    # ----
-    # Remove ROWS:
-
-    if config['data.exclude_rows.pregnancy_diabetes']:
-        steps.append(RowRemoverByFeatureValue(feature=config['diagnosis_cols'],
-                                              exclude_vals=[ICDConverter.PREGNANCY_DIABETES_ICD]))
-
-    for col, exclude_vals in config['data.exclude_rows.where'].items():
-        steps.append(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
-
-    steps.append(RowRemoverByDuplicates(config['data.exclude_rows.duplicate']))
 
     # ----
     # Finalize:
@@ -78,12 +72,18 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
     return pipe
 
 
-def build_cv_pipe(config: Dict, Xy):
-    onehot_converter = OneHotConverter().fit(*Xy)
-    onehot_converter.frozen = True
+def build_cv_pipe(config: Dict, full_Xy) -> Pipeline:
+
+    # ----
+    # fit converter over full dataset
+    onehot_converter = OneHotConverter().fit(*full_Xy)
+    onehot_converter.frozen = True  # prevent re-fitting during train
+    # ----
+
     steps = []
+
     steps.append(Standardizer(**config['data.standardize']))
-    balancer = Balancer(method=config['balance.method'], params=config['balance.params'])
+    balancer = Balancer(**config['balance'])
     if balancer.is_categorical:
         steps += [balancer, onehot_converter]
     else:

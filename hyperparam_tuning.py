@@ -1,9 +1,10 @@
 from sklearn.experimental import enable_halving_search_cv  # required
 from sklearn.model_selection import GridSearchCV, HalvingGridSearchCV, RandomizedSearchCV, StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier
 import paths
 from copy import deepcopy
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
-from config import get_config, update_estimator_in_config
+from config import get_config, update_estimator_in_config, inherit_from_config, FROM_CONFIG
 import pandas as pd
 from typing import Dict, List, Tuple
 import xgboost as xgb
@@ -17,7 +18,27 @@ import os
 os.environ['PYTHONWARNINGS'] = 'ignore'
 
 config_grid = {
-    'balance.method': ['RandomUnderSampler', 'SMOTENC', 'NearMiss1']
+    'random_state': [1337]
+}
+
+balance_grid = {
+    'RandomUnderSampler': {
+        'random_state': [FROM_CONFIG],
+    },
+    'SMOTENC': {
+        'random_state': [FROM_CONFIG],
+        'categorical_features': ['auto'],
+        'k_neighbors': [3, 5]
+    },
+    'NearMiss': {
+        'version': [1, 2, 3],
+        'n_neighbors': [3],
+    },
+    'InstanceHardnessThreshold': {
+        'estimator': [None, RandomForestClassifier(n_estimators=10, random_state=1)],
+        'cv': [3, 5],
+        'random_state': [FROM_CONFIG]
+    }
 }
 
 model_grids = {
@@ -79,9 +100,15 @@ def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
 
 
 def search_model_and_config():
-    default_config = get_config()
-    for config in yield_from_grid(config_grid, default_config):
-        search_model(config)
+    for config in yield_from_grid(grid_dict=config_grid, default_dict=get_config()):
+
+        for balance_method, balance_params_grid in balance_grid.items():
+            for balance_params in yield_from_grid(balance_params_grid):
+                config['balance'] = {
+                    'method': balance_method,
+                    'params': inherit_from_config(balance_params, config)
+                }
+                search_model(config)
 
 
 def search_model(config: Dict):
@@ -115,6 +142,7 @@ def search_model(config: Dict):
 
         # -----
         # base:
+
         print(model_name, "- Searching base params...")
 
         cv = GridSearchCV(estimator_class(
