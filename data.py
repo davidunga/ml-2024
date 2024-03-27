@@ -5,47 +5,53 @@ from sklearn.model_selection import train_test_split
 from paths import DATA_PATH
 from sklearn.pipeline import Pipeline
 from data_transformers import (
-    ColumnTypeSetter, FeatureRemoverByBias, FeatureRemoverByName,
+    ColumnTypeSetter, FeatureRemoverByName,
     RowRemoverByFeatureValue, CategoryReducer, TargetSeparator, ICDConverter,
     OneHotConverter, CategoryGroupOthers, Balancer, Standardizer,
     RowRemoverByDuplicates, AddFeatureAverageAge, AddFeatureByNormalizing,
-    AddFeatureBySumming, AddFeatureEncounter, AddFeatureByCounting
+    AddFeatureBySumming, AddFeatureEncounter, AddFeatureByCounting, PropertySetter, DataTransformer
 )
+
+NUMERIC_COLS = ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
+                'num_medications', 'number_outpatient', 'number_emergency',
+                'number_inpatient', 'number_diagnoses', 'weight']
 
 
 def build_data_prep_pipe(config: Dict) -> Pipeline:
 
+    prop_setter = PropertySetter(default='cat').register(
+        num=NUMERIC_COLS,
+        drop=config['data.exclude_features.by_name'])
+
     steps = []
+
+    def add_step(step: DataTransformer):
+        step.prop_setter = prop_setter
+        steps.append(step)
 
     # ----
     # Add/remove FEATURES:
 
-    steps.append(AddFeatureByNormalizing(config['data.add_features.by_normalize']))
-    steps.append(AddFeatureBySumming(config['data.add_features.by_sum']))
+    add_step(AddFeatureByNormalizing(config['data.add_features.by_normalize']))
+    add_step(AddFeatureBySumming(config['data.add_features.by_sum']))
 
     if config['data.add_features.construct']['average_age']:
-        steps.append(AddFeatureAverageAge(age_group_col='age'))
+        add_step(AddFeatureAverageAge(age_group_col='age'))
     if config['data.add_features.construct']['encounter']:
-        steps.append(AddFeatureEncounter())
-
-    features_to_remove = config['data.exclude_features.by_name']
+        add_step(AddFeatureEncounter())
 
     for kws in config['data.add_features.by_count']:
-        steps.append(AddFeatureByCounting(mapping=kws['mapping'],
-                                          values_to_count=kws['values_to_count'],
-                                          invert=kws['invert']))
-        if kws['drop_originals']:
-            features_to_remove += [v for vs in kws['mapping'].values() for v in vs]
+        add_step(AddFeatureByCounting(**kws))
 
     # ----
     # Reduce/group CATEGORIES:
 
     for col, lookup in config['data.categories.reduce'].items():
-        steps.append(CategoryReducer(feature=col, lookup=lookup))
+        add_step(CategoryReducer(feature=col, lookup=lookup))
 
-    steps.append(CategoryGroupOthers(config['data.categories.group_others']))
+    add_step(CategoryGroupOthers(config['data.categories.group_others']))
 
-    steps.append(ICDConverter(features=config['diagnosis_cols']))
+    add_step(ICDConverter(features=config['diagnosis_cols']))
 
     # ----
     # Remove ROWS:
@@ -62,8 +68,7 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
     # ----
     # Finalize:
 
-    steps.append(FeatureRemoverByName(features_to_remove=features_to_remove))
-    steps.append(ColumnTypeSetter())
+    steps.append(prop_setter)
     steps.append(TargetSeparator(target_col=config['target_col']))
 
     pipe = Pipeline(steps=[(step.name, step) for step in steps])
@@ -75,6 +80,7 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
 
 def build_cv_pipe(config: Dict, Xy):
     onehot_converter = OneHotConverter().fit(*Xy)
+    onehot_converter.frozen = True
     steps = []
     steps.append(Standardizer(**config['data.standardize']))
     balancer = Balancer(method=config['balance.method'], params=config['balance.params'])
@@ -98,43 +104,6 @@ def describe_pipe(pipe: Pipeline):
         if len(lines[-1]) >= max_row_len:
             lines.append("")
     print("\n".join(lines))
-
-
-
-def verbolize_pipeline(pipe):
-    from functools import wraps
-    """
-    Modifies an sklearn pipeline to print a message to the terminal whenever
-    fit, transform, or fit_transform methods are called. The message includes
-    the step's name, the input size, and the function that was called.
-    """
-
-    # Function to create a wrapper around the methods
-    def create_wrapper(original_func):
-        @wraps(original_func)
-        def wrapper(*args, **kwargs):
-            def _typ(a) -> str:
-                if isinstance(a, list):
-                    return "[" + ", ".join([_typ(aa) for aa in a]) + "]"
-                if isinstance(a, tuple):
-                    return "(" + ",".join([_typ(aa) for aa in a]) + ")"
-                elif a is None:
-                    return "None"
-                else:
-                    return str(type(a)).split(".")[-1].split("'")[0]
-            print(original_func.__self__.__class__, original_func.__name__, _typ(list(args)))
-
-            return original_func(*args, **kwargs)
-
-        return wrapper
-
-    for name, estimator in pipe.steps:
-        for method_name in ['fit', 'transform', 'fit_transform']:
-            if hasattr(estimator, method_name):
-                original_method = getattr(estimator, method_name)
-                setattr(estimator, method_name, create_wrapper(original_method))
-
-    return pipe
 
 
 def load_data(config: Dict) -> pd.DataFrame:

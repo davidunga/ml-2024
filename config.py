@@ -26,7 +26,7 @@ _config = {
     'data.standardize': {
         'default_transform': 'sqrt',
         'feature_transforms': {},
-        'outlier_p': .01,
+        'outlier_p': 0,
         'offset': .5
     },
 

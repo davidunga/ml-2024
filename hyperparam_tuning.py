@@ -11,6 +11,8 @@ import catboost as catb
 import numpy as np
 import cv_result_manager
 from pipe_cross_val import set_pipecv
+import os
+os.environ['PYTHONWARNINGS'] = 'ignore'
 
 grids = {
     'XGB': {

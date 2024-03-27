@@ -8,6 +8,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
 from typing import List, Dict, Tuple
 from copy import deepcopy
+from collections import defaultdict
 
 
 def unpack_args(X, y):
@@ -19,8 +20,17 @@ def unpack_args(X, y):
 
 class DataTransformer(BaseEstimator, TransformerMixin):
 
-    def fit(self, *args):
+    prop_setter = None
+    frozen: bool = False  # if true, fit() does nothing
+    
+    def _fit(self, *args):
         return self
+
+    def fit(self, *args):
+        if self.frozen:
+            return self
+        else:
+            return self._fit(*args)
 
     @property
     def name(self):
@@ -31,22 +41,84 @@ class DataTransformer(BaseEstimator, TransformerMixin):
         return name
 
 
+class PropertySetter(DataTransformer):
+    """
+    Keeps track of column data types and column removals, and
+        transforms the data accordingly
+    """
+
+    _PROPS = {'num': 'float', 'cat': 'category', 'drop': 'drop'}
+
+    def __init__(self, default: str = None, verbose: int = 1):
+        self.props = {}
+        self.default = default
+        self.verbose = verbose
+
+    def register(self, **kwargs):
+        for prop, cols in kwargs.items():
+            assert prop in self._PROPS
+            for col in cols:
+                if col not in self.props or prop == 'drop':
+                    self.props[col] = prop
+                else:
+                    assert self.props[col] in (prop, 'drop')
+        return self
+
+    def transform(self, X):
+
+        report = defaultdict(list)
+
+        # validate
+        non_numeric = list(X.select_dtypes('object').columns)
+        assert all(self.props.get(col, None) != 'num' for col in non_numeric)
+
+        # set missing columns to default
+        if self.default:
+            missing_cols = [col for col in X.columns if col not in self.props]
+            self.register(**{self.default: missing_cols})
+
+        # drop:
+        cols_to_drop = [col for col in X.columns if self.props.get(col, None) == 'drop']
+        X.drop(columns=cols_to_drop, inplace=True)
+
+        report['Dropped'] = cols_to_drop
+
+        # set type:
+        for col in X.columns:
+            dtype = self._PROPS[self.props[col]]
+            X[col] = X[col].astype(dtype)
+            report[f'Converted to {dtype}'].append(col)
+
+        if self.verbose:
+            print(self.name + ":")
+            for action, cols in report.items():
+                print(f"  {action} ({len(cols)}):", cols)
+
+        return X
+
+
 class Standardizer(DataTransformer):
     """ Transform numeric features to be approximately normal and remove outliers """
 
     TRANSFORMS = {'none': lambda x: x.astype(float), 'sqrt': np.sqrt}
 
     def __init__(self, default_transform: str, feature_transforms: Dict[str, str],
-                 outlier_p: float = .05, offset: float = 0):
+                 outlier_p: float = .01, offset: float = 0):
         self.outlier_p = outlier_p
         self.offset = offset
         self.default_transform = default_transform
         self.feature_transforms = feature_transforms
         self.standardize_params = {}
 
-    def fit(self, Xy, y=None, **kwargs):
+    def _fit(self, Xy, y=None, **kwargs):
         X, y = unpack_args(Xy, y)
-        inlier_range = [100 * self.outlier_p, 100 * (1 - self.outlier_p)]
+
+        def _get_clip_lims(x):
+            if not self.outlier_p:
+                return None
+            else:
+                return np.percentile(x, [100 * self.outlier_p, 100 * (1 - self.outlier_p)])
+
         for feature in X.select_dtypes('number').columns:
             tform = self.feature_transforms.get(feature, self.default_transform)
             func = self.TRANSFORMS[tform]
@@ -55,8 +127,7 @@ class Standardizer(DataTransformer):
             center = np.mean(x)
             scale = np.std(x)
             x = self._apply_transform(x, tform, center, scale)
-            clip_lims = np.percentile(x, inlier_range)
-            self.standardize_params[feature] = (tform, center, scale, clip_lims)
+            self.standardize_params[feature] = (tform, center, scale, _get_clip_lims(x))
         return self
 
     def _apply_transform(self, x, tform, center, scale, clip_lims=None):
@@ -108,7 +179,7 @@ class Balancer(DataTransformer):
         """ does transformer expect categorical (dataframe) input? """
         return self.method in Balancer.CATEGORICAL_METHODS
 
-    def fit_transform(self, Xy, y=None, **kwargs):
+    def _fit_transform(self, Xy, y=None, **kwargs):
         return self._sampler.fit_resample(*unpack_args(Xy, y), **kwargs)
 
     def transform(self, Xy, **kwargs):
@@ -132,6 +203,7 @@ class CategoryGroupOthers(DataTransformer):
     def transform(self, X):
         for col in self.nonother:
             X.loc[~X[col].isin(self.nonother[col]), col] = 'Other'
+        self.prop_setter.register(cat=list(self.nonother.keys()))
         return X
 
 
@@ -153,7 +225,7 @@ class RowRemoverByFeatureValue(DataTransformer):
         self.exclude_vals = exclude_vals
         self.rows_to_drop = []
 
-    def fit(self, X, y=None):
+    def _fit(self, X, y=None):
         cols = self.feature.split(',')
         self.rows_to_drop = X.loc[X[cols].isin(self.exclude_vals).any(axis=1)].index
         return self
@@ -183,6 +255,7 @@ class AddFeatureAverageAge(DataTransformer):
         assert new_colname not in X
         X[new_colname] = [(int(bounds[0]) + int(bounds[1])) // 2
                           for bounds in (s[1:-1].split('-') for s in X[self.age_group_col])]
+        self.prop_setter.register(num=[new_colname], cat=[self.age_group_col])
         return X
 
 
@@ -193,7 +266,7 @@ class FeatureRemoverByBias(DataTransformer):
         self.bias_scores = {}
         self.features_to_keep = []
 
-    def fit(self, X, y=None):
+    def _fit(self, X, y=None):
         self.bias_scores = {col: max(X[col].value_counts(normalize=True))
                             for col in X.columns}
         self.features_to_keep = [col for col, bias in self.bias_scores.items() if bias < self.thresh]
@@ -214,7 +287,7 @@ class CategoryReducer(DataTransformer):
         self.lookup = lookup
         self.new_labels = None
 
-    def fit(self, X, y=None):
+    def _fit(self, X, y=None):
         self.new_labels = np.array(['Missing' if is_na else 'Other' for is_na in X[self.feature].isna()], str)
         for new_label, current_labels in self.lookup.items():
             self.new_labels[X[self.feature].isin(current_labels)] = new_label
@@ -223,6 +296,7 @@ class CategoryReducer(DataTransformer):
     def transform(self, X):
         assert len(self.new_labels) == len(X)
         X[self.feature] = self.new_labels
+        self.prop_setter.register(cat=[self.feature])
         return X
 
 
@@ -239,7 +313,7 @@ class CategoryReducer_with_other(DataTransformer):
         self.new_labels = None
         self.keys = [str.lower(key) for key in lookup.keys()]
 
-    def fit(self, X):
+    def _fit(self, X):
         self.new_labels = deepcopy(X[self.feature])
         
         for key in self.lookup.keys():
@@ -313,6 +387,7 @@ class ICDConverter(DataTransformer):
     def transform(self, X):
         for feature in self.features:
             X[feature] = [self._convert_value(value) for value in X[feature]]
+        self.prop_setter.register(cat=self.features)
         return X
 
 
@@ -324,7 +399,7 @@ class OneHotConverter(DataTransformer):
         self.reverse_feature_names = []
         pass
 
-    def fit(self, Xy, y=None):
+    def _fit(self, Xy, y=None):
         X, y = unpack_args(Xy, y)
         sep = "."
 
@@ -343,9 +418,6 @@ class OneHotConverter(DataTransformer):
                                       for s in self._feature_transformer.get_feature_names_out()]
 
         return self
-
-    def fit_transform(self, Xy, y=None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
-        return self.transform(*unpack_args(Xy, y))
 
     def transform(self, Xy, y=None) -> Tuple[np.ndarray, np.ndarray]:
         X, y = unpack_args(Xy, y)
@@ -373,6 +445,7 @@ class AddFeatureByNormalizing(DataTransformer):
             for feature in features:
                 new_feature = f"{feature}_{suffix}"
                 X[new_feature] = np.divide(X[feature].to_numpy(), factor, out=np.zeros_like(factor), where=mask)
+                self.prop_setter.register(num=[feature, new_feature, by])
         return X
 
 
@@ -384,13 +457,14 @@ class AddFeatureBySumming(DataTransformer):
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         for new_feature, features in self.features_to_sum.items():
             X[new_feature] = X[features].sum(axis=1)
+            self.prop_setter.register(num=[new_feature] + features)
         return X
 
 
 class AddFeatureByCounting(DataTransformer):
     """ Create feature by counting value(s) occurrences in a subset of features """
 
-    def __init__(self, mapping: Dict, values_to_count: List, invert: bool):
+    def __init__(self, mapping: Dict, values_to_count: List, invert: bool, drop_originals: bool):
         """
             mapping: dict of form {new_feature: features_to_count_in}
             values_to_count: list of values to count
@@ -399,11 +473,15 @@ class AddFeatureByCounting(DataTransformer):
         self.mapping = mapping
         self.values_to_count = values_to_count
         self.invert = invert
+        self.drop_originals = drop_originals
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         for (new_feature, features) in self.mapping.items():
             counts = X[features].isin(self.values_to_count).sum(axis=1)
             X[new_feature] = counts if not self.invert else len(features) - counts
+            if self.drop_originals:
+                self.prop_setter.register(drop=features)
+        self.prop_setter.register(num=list(self.mapping.keys()))
         return X
 
 
@@ -414,4 +492,5 @@ class AddFeatureEncounter(DataTransformer):
         X.loc[X['A1Cresult'].isin(('>7', '>8')), 'encounter'] = '7_No'
         X.loc[X['A1Cresult'].isin(('>7', '>8')) & (X['change'] == 'Ch'), 'encounter'] = '7_Ch'
         X.loc[X['A1Cresult'] == 'Norm', 'encounter'] = 'Norm'
+        self.prop_setter.register(cat=['encounter'], drop=['A1Cresult'])
         return X
