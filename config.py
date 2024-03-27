@@ -1,6 +1,7 @@
 from copy import deepcopy
 from hashlib import md5
 import json
+import numpy as np
 from typing import Dict, List, Tuple
 
 _config = {
@@ -9,6 +10,9 @@ _config = {
     'diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
 
     'random_state': 1337,
+
+    'estimator.name': '',
+    'estimator.params': {},
 
     'data.sanity_mode': 'none',
     'data.test_size': .2,
@@ -107,7 +111,26 @@ def get_config() -> Dict:
     return deepcopy(_config)
 
 
-def get_config_id(config: Dict) -> str:
-    id_size = 6
-    config_str = json.dumps(config)
-    return md5(config_str.encode()).hexdigest()[:id_size]
+def update_estimator_in_config(config: Dict, name: str, params: Dict) -> Dict:
+    config = deepcopy(config)
+    config['estimator.name'] = name
+    config['estimator.params'] = {k: int(v) if isinstance(v, np.integer) else v
+                                  for k, v in params.items()}
+    return config
+
+
+def get_config_name(config: Dict) -> str:
+    config = deepcopy(config)
+
+    def _get_hash(obj) -> str:
+        return md5(json.dumps(obj).encode()).hexdigest()[:4]
+
+    params_hash = _get_hash(config['estimator.params'])
+    total_hash = _get_hash(config)
+
+    estimator_name = 'x' if not config['estimator.name'] else config['estimator.name']
+
+    name = f"{estimator_name} {config['balance.method']} seed{config['random_state']}"
+    name += f" params{params_hash} {total_hash}"
+
+    return name

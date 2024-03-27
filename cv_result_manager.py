@@ -1,7 +1,8 @@
 import pandas as pd
+from pathlib import Path
 import paths
 from typing import Dict, Tuple, List
-from config import get_config_id
+from config import get_config_name
 
 
 def display(results_df: pd.DataFrame):
@@ -15,19 +16,17 @@ def display(results_df: pd.DataFrame):
 
 def save(results_df: pd.DataFrame):
     config = results_df.attrs['config']
-    model_name = results_df.loc[0, 'model_name']
-    seed = results_df.loc[0, 'random_state']
-    results_csv = paths.CV_RESULTS_PATH / (make_name(config, model_name, seed) + ".csv")
+    results_csv = get_csv_path(config)
     results_csv.parent.mkdir(exist_ok=True, parents=True)
     results_df.to_csv(str(results_csv))
 
 
-def make_dataframe(config: Dict, model_name: str, random_state: int, cv_results: Dict) -> pd.DataFrame:
-    results_df = pd.DataFrame({"model_name": model_name, "random_state": random_state, **cv_results})
+def make_dataframe(config: Dict, cv_results: Dict) -> pd.DataFrame:
+    results_df = pd.DataFrame({"model_name": config['estimator.name'], **cv_results})
     results_df.attrs['config'] = config
     return results_df
 
 
-def make_name(config: Dict, model_name: str, seed: int):
-    return f"cfg{get_config_id(config)} {model_name} seed{seed}"
+def get_csv_path(config) -> Path:
+    return paths.CV_RESULTS_PATH / (get_config_name(config) + ".csv")
 

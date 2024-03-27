@@ -1,8 +1,9 @@
 from sklearn.experimental import enable_halving_search_cv  # required
 from sklearn.model_selection import GridSearchCV, HalvingGridSearchCV, RandomizedSearchCV, StratifiedKFold
 import paths
+from copy import deepcopy
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
-from config import get_config, get_config_id
+from config import get_config, update_estimator_in_config
 import pandas as pd
 from typing import Dict, List, Tuple
 import xgboost as xgb
@@ -10,11 +11,16 @@ import lightgbm as lgb
 import catboost as catb
 import numpy as np
 import cv_result_manager
+from itertools import product
 from pipe_cross_val import set_pipecv
 import os
 os.environ['PYTHONWARNINGS'] = 'ignore'
 
-grids = {
+config_grid = {
+    'balance.method': ['RandomUnderSampler', 'SMOTENC', 'NearMiss1']
+}
+
+model_grids = {
     'XGB': {
         'estimator': xgb.XGBClassifier,
         'base_grid': {
@@ -61,30 +67,47 @@ def get_best_iteration(estimator):
     assert AttributeError("Estimator doesnt have best iteration attribute")
 
 
-def tune(config: Dict):
+def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
+    default_dict = deepcopy(default_dict) if default_dict else {}
+    keys = grid_dict.keys()
+    if default_dict:
+        assert set(keys).issubset(default_dict.keys())
+    for vals in product(*grid_dict.values()):
+        result = default_dict
+        result.update(dict(zip(keys, vals)))
+        yield result
+
+
+def search_model_and_config():
+    default_config = get_config()
+    for config in yield_from_grid(config_grid, default_config):
+        search_model(config)
+
+
+def search_model(config: Dict):
 
     cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'],
                'verbose': 0, 'refit': config['cv.main_score'],
                'return_train_score': True, 'n_jobs': -1}
 
-    random_state = config['random_state']
+    seed = config['random_state']
 
     raw_data = load_data(config)
     prep_pipe = build_data_prep_pipe(config)
     Xy = prep_pipe.fit_transform(raw_data)
     cv_pipe = build_cv_pipe(config, Xy)
 
-    Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], random_state=random_state)
-    Xy_base_train, Xy_base_val = stratified_split(Xy_train, test_size=config['cv.base.val_size'], random_state=random_state)
+    Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], random_state=seed)
+    Xy_base_train, Xy_base_val = stratified_split(Xy_train, test_size=config['cv.base.val_size'], random_state=seed)
     Xy_base_val = cv_pipe.fit(Xy_base_train).transform(Xy_base_val)
 
-    for model_name in grids:
+    for model_name in model_grids:
 
-        estimator_class = grids[model_name]['estimator']
-        base_grid = grids[model_name]['base_grid']
-        fine_grid = grids[model_name]['fine_grid']
+        estimator_class = model_grids[model_name]['estimator']
+        base_grid = model_grids[model_name]['base_grid']
+        fine_grid = model_grids[model_name]['fine_grid']
 
-        DEV = False
+        DEV = True
         if DEV:
             # smaller grid for dev/debug..
             base_grid = _reduce_grid(base_grid)
@@ -95,7 +118,7 @@ def tune(config: Dict):
 
         cv = GridSearchCV(estimator_class(
             early_stopping_rounds=config['cv.base.early_stopping_rounds'],
-            random_state=random_state), param_grid=base_grid, **cv_args)
+            random_state=seed), param_grid=base_grid, **cv_args)
         set_pipecv(cv, cv_pipe)
 
         cv.fit(*Xy_base_train, eval_set=[Xy_base_val])
@@ -113,17 +136,18 @@ def tune(config: Dict):
         print(model_name, "- Fine tuning...")
 
         cv = GridSearchCV(
-            estimator_class(**params, random_state=random_state),
+            estimator_class(**params, random_state=seed),
             param_grid=fine_grid, **cv_args)
         set_pipecv(cv, cv_pipe)
 
         cv.fit(*Xy_train)
 
+        fitted_config = update_estimator_in_config(config, model_name, params)
         print(model_name + ":")
         print(" Best fine-tuned params:", params)
         print(" Score:", cv.best_score_)
 
-        results_df = cv_result_manager.make_dataframe(config, model_name, random_state, cv.cv_results_)
+        results_df = cv_result_manager.make_dataframe(fitted_config, cv.cv_results_)
         cv_result_manager.display(results_df)
         cv_result_manager.save(results_df)
 
@@ -133,4 +157,4 @@ def _reduce_grid(grid: Dict) -> Dict:
 
 
 if __name__ == "__main__":
-    tune(config=get_config())
+    search_model_and_config()
