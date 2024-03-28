@@ -1,13 +1,12 @@
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+import object_builder
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder, PowerTransformer
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
 from typing import List, Dict, Tuple
-from copy import deepcopy
 from collections import defaultdict
 
 
@@ -147,39 +146,35 @@ class Standardizer(DataTransformer):
 
 
 class Balancer(DataTransformer):
-    """ wrapper for data balancing classes """
+    """ wrapper for data balancing classes
+        provides a transformer-like api and manages sampling from train/test splits
+    """
 
-    _required_params = ['random_state']
+    _required_params = ['random_state']  # require even if sampler has a default value
+    _dataframe_input = ['SMOTENC']  # samplers that allow or require dataframe input
 
     # @TODO add SDV
 
     def __init__(self, method: str, params: Dict):
-
         self.method = method
         self.params = params
-        self._sampler_class = None
         if self.method != 'none':
-
-            for imbl_module in [imbl.under_sampling, imbl.over_sampling, imbl.combine]:
-                if hasattr(imbl_module, self.method):
-                    self._sampler_class = getattr(imbl_module, self.method)
-                    break
-            if self._sampler_class is None:
-                raise ValueError("Unknown sampling method")
-
             self._get_new_sampler()  # verify we're good to go
 
     def _get_new_sampler(self):
-        sampler = self._sampler_class(**self.params)
+        sampler_class = object_builder.get_class(self.method, [imbl.under_sampling, imbl.over_sampling, imbl.combine])
+        params = {k: object_builder.get_instance(**v) if k == 'estimator' and v is not None else v
+                  for k, v in self.params.items()}
+        sampler = sampler_class(**params)
         for param in self._required_params:
             if hasattr(sampler, param) and param not in self.params:
                 raise ValueError(f"Missing required parameter: {param}")
+
         return sampler
 
     @property
-    def is_categorical(self) -> bool:
-        """ does transformer expect categorical (dataframe) input? """
-        return self.method in ('SMOTENC',)
+    def is_dataframe_in(self) -> bool:
+        return self.method in self._dataframe_input
 
     def fit_transform(self, Xy, y=None, **kwargs):
         # called on training set -- resample and forget
@@ -203,6 +198,7 @@ class ReplaceValueToNan(DataTransformer):
 
 
 class CategoryGroupOthers(DataTransformer):
+    """ Set values that do not appear in 'nonother', to 'Other' """
 
     def __init__(self, nonother: Dict):
         self.nonother = nonother
@@ -281,7 +277,9 @@ class CategoryReducer(DataTransformer):
 
 
 class TargetSeparator(DataTransformer):
-    """ Split dataframe to X, y dataframes """
+    """ Split dataframe to X, y dataframes,
+        Possibly manipulate the target variable for sanity tests
+    """
 
     def __init__(self, target_col: str, sanity_mode: str = 'none'):
         assert sanity_mode in ('none', 'must_fail', 'must_succeed')
@@ -304,6 +302,7 @@ class TargetSeparator(DataTransformer):
 
 
 class ICDConverter(DataTransformer):
+    """ Group ICD category levels """
 
     ICD_GROUPS = {
         1: range(0, 140), 2: range(140, 240), 3: range(240, 280), 4: range(280, 290), 5: range(290, 320),
@@ -335,6 +334,9 @@ class ICDConverter(DataTransformer):
 
 
 class OneHotConverter(DataTransformer):
+    """
+    Onehot encode features and target, keep track of original feature names
+    """
 
     def __init__(self):
         self._feature_transformer = None
@@ -343,13 +345,15 @@ class OneHotConverter(DataTransformer):
         pass
 
     def _fit(self, Xy, y=None):
+
         X, y = unpack_args(Xy, y)
-        sep = "."
+        name_sep = "."
 
         def _combinator(feature, category):
-            return f"{feature}{sep}{str(category)}"
+            return f"{feature}{name_sep}{str(category)}"
 
-        onehot_encoder = OneHotEncoder(handle_unknown="error", feature_name_combiner=_combinator, sparse_output=False)
+        onehot_encoder = OneHotEncoder(
+            handle_unknown="error", feature_name_combiner=_combinator, sparse_output=False)
         cat_cols = X.select_dtypes('category').columns
         self._feature_transformer = ColumnTransformer(
             remainder='passthrough',
@@ -357,7 +361,7 @@ class OneHotConverter(DataTransformer):
         )
         self._feature_transformer.fit(X)
         self._label_transformer.fit(y)
-        self.reverse_feature_names = [s.split('__')[-1].split(sep)[0]
+        self.reverse_feature_names = [s.split('__')[-1].split(name_sep)[0]
                                       for s in self._feature_transformer.get_feature_names_out()]
 
         return self
@@ -393,6 +397,7 @@ class AddFeatureByNormalizing(DataTransformer):
 
 
 class AddFeatureBySumming(DataTransformer):
+    """ Create feature by summing other features """
 
     def __init__(self, features_to_sum: Dict[str, List[str]]):
         self.features_to_sum = features_to_sum
@@ -405,13 +410,14 @@ class AddFeatureBySumming(DataTransformer):
 
 
 class AddFeatureByCounting(DataTransformer):
-    """ Create feature by counting value(s) occurrences in a subset of features """
+    """ Create feature by counting value(s) occurrences in a other features """
 
     def __init__(self, mapping: Dict, values_to_count: List, invert: bool, drop_originals: bool):
         """
             mapping: dict of form {new_feature: features_to_count_in}
             values_to_count: list of values to count
             invert: if True, count how many times value does not appear
+            drop_originals: drop the counted features?
         """
         self.mapping = mapping
         self.values_to_count = values_to_count
@@ -429,6 +435,7 @@ class AddFeatureByCounting(DataTransformer):
 
 
 class AddFeatureEncounter(DataTransformer):
+    """ Construct 'encounter' from 'A1Cresult', and drop 'A1Cresult' """
 
     def transform(self, X):
         X['encounter'] = 'None'

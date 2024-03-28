@@ -4,12 +4,10 @@ from sklearn.ensemble import RandomForestClassifier
 import paths
 from copy import deepcopy
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
-from config import get_config, update_estimator_in_config, inherit_from_config, FROM_CONFIG
+from config import get_default_config, inherit_from_config, FROM_CONFIG
 import pandas as pd
 from typing import Dict, List, Tuple
-import xgboost as xgb
-import lightgbm as lgb
-import catboost as catb
+import object_builder
 import numpy as np
 import cv_result_manager
 from itertools import product
@@ -37,15 +35,16 @@ balance_grid = {
         'n_neighbors': [3],
     },
     'InstanceHardnessThreshold': {
-        'estimator': [None, RandomForestClassifier(n_estimators=10, random_state=1)],
+        'estimator': [None, {'cls': 'sklearn.ensemble.RandomForestClassifier',
+                             'kws': {'n_estimators': 10, 'random_state': 1}}],
         'cv': [3, 5],
         'random_state': [FROM_CONFIG]
     }
 }
 
+
 model_grids = {
-    'XGB': {
-        'estimator': xgb.XGBClassifier,
+    'XGBClassifier': {
         'base_grid': {
             'max_depth': np.arange(3, 10),
             'learning_rate': np.array([1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 1e-1])
@@ -59,8 +58,7 @@ model_grids = {
             'reg_lambda': [1e-5, 1e-3, 1e-2, 1, 1e2],
         }
     },
-    'LGB': {
-        'estimator': lgb.LGBMClassifier,
+    'LGBMClassifier': {
         'base_grid': {
             'max_depth': np.arange(3, 10),
             'learning_rate': np.array([1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 1e-1])
@@ -70,8 +68,7 @@ model_grids = {
             'subsample': [.6, .8, 1.],
         }
     },
-    'CATB': {
-        'estimator': catb.CatBoostClassifier,
+    'CatBoostClassifier': {
         'base_grid': {
             'max_depth': np.arange(3, 10),
             'learning_rate': np.array([1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 1e-1])
@@ -101,21 +98,30 @@ def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
         yield result
 
 
-def search_model_and_config(finetune: bool):
-    default_config = get_config()
-    default_config['finetune'] = finetune
-    for config in yield_from_grid(grid_dict=config_grid, default_dict=default_config):
+def cv_search_model_and_config(finetune: bool):
+    """ cv-search models and configurations """
 
+    default_config = get_default_config()
+    default_config['finetune'] = finetune
+
+    for config in yield_from_grid(grid_dict=config_grid, default_dict=default_config):
+        # for each configuration in grid..
+
+        # further adjust configuration according to balancing params..
         for balance_method, balance_params_grid in balance_grid.items():
             for balance_params in yield_from_grid(balance_params_grid):
+
                 config['balance'] = {
                     'method': balance_method,
                     'params': inherit_from_config(balance_params, config)
                 }
-                search_model(config)
+
+                # search best model with this configuration
+                cv_search_model(config)
 
 
-def search_model(config: Dict):
+def cv_search_model(config: Dict):
+    """ cv-search a model for a given configuration """
 
     cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'],
                'verbose': 0, 'refit': config['cv.main_score'],
@@ -132,11 +138,11 @@ def search_model(config: Dict):
     Xy_base_train, Xy_base_val = stratified_split(Xy_train, test_size=config['cv.base.val_size'], random_state=seed)
     Xy_base_val = cv_pipe.fit(Xy_base_train).transform(Xy_base_val)
 
-    for model_name in model_grids:
+    for estimator_name in model_grids:
 
-        estimator_class = model_grids[model_name]['estimator']
-        base_grid = model_grids[model_name]['base_grid']
-        fine_grid = model_grids[model_name]['fine_grid']
+        estimator_class = object_builder.get_class(estimator_name)
+        base_grid = model_grids[estimator_name]['base_grid']
+        fine_grid = model_grids[estimator_name]['fine_grid']
 
         DEV = False
         if DEV:
@@ -147,7 +153,7 @@ def search_model(config: Dict):
         # -----
         # base:
 
-        print(model_name, "- Searching base params...")
+        print(estimator_name, "- Searching base params...")
 
         cv = GridSearchCV(estimator_class(
             early_stopping_rounds=config['cv.base.early_stopping_rounds'],
@@ -159,7 +165,7 @@ def search_model(config: Dict):
         params = cv.best_params_
         params['n_estimators'] = get_best_iteration(cv.best_estimator_)
 
-        print(model_name + ":")
+        print(estimator_name + ":")
         print(" Best base params:", params)
         print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
 
@@ -168,7 +174,7 @@ def search_model(config: Dict):
 
         if config['finetune']:
 
-            print(model_name, "- Fine tuning...")
+            print(estimator_name, "- Fine tuning...")
 
             cv = GridSearchCV(
                 estimator_class(**params, random_state=seed),
@@ -178,15 +184,14 @@ def search_model(config: Dict):
             cv.fit(*Xy_train)
 
             params = {**cv.best_params_, **params}
-            print(model_name + ":")
+            print(estimator_name + ":")
             print(" Best fine-tuned params:", cv.best_params_)
             print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
 
         # -----
         # finalize
 
-        fitted_config = update_estimator_in_config(config, model_name, params)
-        cv_result_manager.process_result(fitted_config, cv)
+        cv_result_manager.process_result(config, cv)
 
 
 def _reduce_grid(grid: Dict) -> Dict:
@@ -194,4 +199,4 @@ def _reduce_grid(grid: Dict) -> Dict:
 
 
 if __name__ == "__main__":
-    search_model_and_config(finetune=False)
+    cv_search_model_and_config(finetune=False)

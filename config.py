@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 
 FROM_CONFIG = '_from_config_'
 
-_config = {
+_default_config = {
 
     'target_col': 'readmitted',
     'diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
@@ -16,9 +16,6 @@ _config = {
 
     'random_state': 1337,
     'finetune': False,
-
-    'estimator.name': '',
-    'estimator.params': {},
 
     'data.sanity_mode': 'none',
     'data.test_size': .2,
@@ -32,7 +29,7 @@ _config = {
 
     'balance': {
         'method': 'RandomUnderSampler',
-        'params': {'random_state': 1337}
+        'params': {'random_state': FROM_CONFIG}
     },
 
     'data.standardize': {
@@ -113,37 +110,23 @@ _config = {
 }
 
 
-def get_config() -> Dict:
-    return deepcopy(_config)
-
-
-def update_estimator_in_config(config: Dict, name: str, params: Dict) -> Dict:
-    config = deepcopy(config)
-    config['estimator.name'] = name
-    config['estimator.params'] = {k: int(v) if isinstance(v, np.integer) else v
-                                  for k, v in params.items()}
-    return config
+def get_default_config() -> Dict:
+    return deepcopy(_default_config)
 
 
 def get_config_name(config: Dict) -> str:
-    config = deepcopy(config)
-
-    def _get_hash(obj) -> str:
-        return md5(json.dumps(obj).encode()).hexdigest()[:4]
-
-    params_hash = _get_hash(config['estimator.params'])
-    total_hash = _get_hash(config)
-
-    estimator_name = 'x' if not config['estimator.name'] else config['estimator.name']
-
-    name = f"{estimator_name} {config['balance']['method']} seed{config['random_state']}"
-    name += f" params{params_hash} {total_hash}"
+    hash_ = md5(json.dumps(config).encode()).hexdigest()[:4]
+    name = f"{config['balance']['method']} seed{config['random_state']} {hash_}"
     if config['finetune']:
         name += " TUNED"
-
     return name
 
 
-def inherit_from_config(d: Dict, config: Dict):
-    return {k: config[k] if (isinstance(v, str) and v == FROM_CONFIG) else v
+def inherit_from_config(d: Dict, config: Dict) -> Dict:
+    """ recursively replace <FROM_CONFIG> entries with corresponding config entries """
+    def _get(v):
+        if isinstance(v, Dict): return inherit_from_config(v, config)
+        if isinstance(v, List): return [_get(vv) for vv in v]
+        return v
+    return {k: config[k] if type(v) == type(FROM_CONFIG) and v == FROM_CONFIG else _get(v)
             for k, v in d.items()}

@@ -19,11 +19,12 @@ def process_result(config: Dict, cv: BaseSearchCV):
 
 
 def make_result_dict(config: Dict, cv: BaseSearchCV) -> Dict:
-    df = pd.DataFrame({"model_name": config['estimator.name'],
-                       **cv.cv_results_, "config": json.dumps(config)})
+    estimator_name = cv.estimator.__class__.__name__
+    df = pd.DataFrame({"estimator_name": estimator_name, **cv.cv_results_, "config": json.dumps(config)})
     res = {
         'df': df,
         'config': config,
+        'estimator_name': estimator_name,
         'best_estimator': cv.best_estimator_,
         'best_params': cv.best_params_,
         'best_score': cv.best_score_
@@ -44,12 +45,13 @@ def display(result_dict: Dict):
 
 def save(result_dict: Dict):
     config_name = get_config_name(result_dict['config'])
+    fname = f"{result_dict['estimator_name']} {config_name}"
 
-    results_csv = paths.CV_RESULTS_PATH / (config_name + ".csv")
+    results_csv = paths.CV_RESULTS_PATH / (fname + ".csv")
     results_csv.parent.mkdir(exist_ok=True, parents=True)
     result_dict['df'].to_csv(str(results_csv))
 
-    best_model_pkl = paths.BEST_MODELS_PATH / (config_name + ".pkl")
+    best_model_pkl = paths.BEST_MODELS_PATH / (fname + ".pkl")
     best_model_pkl.parent.mkdir(exist_ok=True, parents=True)
     with best_model_pkl.open('wb') as f:
         pickle.dump({k: v for k, v in result_dict.items() if k != 'df'}, f)

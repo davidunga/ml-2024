@@ -74,20 +74,16 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
 
 def build_cv_pipe(config: Dict, full_Xy) -> Pipeline:
 
-    # ----
-    # fit converter over full dataset
-    onehot_converter = OneHotConverter().fit(*full_Xy)
+    onehot_converter = OneHotConverter().fit(*full_Xy)  # fit over full dataset
     onehot_converter.frozen = True  # prevent re-fitting during train
-    # ----
 
-    steps = []
-
-    steps.append(Standardizer(**config['data.standardize']))
+    standardizer = Standardizer(**config['data.standardize'])
     balancer = Balancer(**config['balance'])
-    if balancer.is_categorical:
-        steps += [balancer, onehot_converter]
+
+    if balancer.is_dataframe_in:
+        steps = [standardizer, balancer, onehot_converter]
     else:
-        steps += [onehot_converter, balancer]
+        steps = [standardizer, onehot_converter, balancer]
 
     pipe = Pipeline(steps=[(step.name, step) for step in steps])
     print("CV pipe:")
