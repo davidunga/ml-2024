@@ -1,0 +1,161 @@
+from typing import Dict, Tuple, Sequence, List
+from itertools import product
+import numpy as np
+
+
+class Grid:
+    """
+    A multi-dim grid
+    """
+
+    def __init__(self, grid: Dict | Sequence):
+        if not isinstance(grid, Dict):
+            self.grid = {i: np.asarray(ax) for i, ax in enumerate(grid)}
+        else:
+            self.grid = {name: np.asarray(ax) for name, ax in grid.items()}
+        for ax in self.grid.values():
+            assert np.all(np.diff(ax) > 0), "Axis values must be sorted in ascending order"
+        self.shape = tuple(len(ax) for ax in self.grid.values())
+        self.total_size = int(np.prod(self.shape))
+        self.ndim = len(self.grid)
+
+    @property
+    def ax_names(self) -> List:
+        return list(self.grid)
+
+    def is_valid_coord(self, coord) -> bool:
+        if not len(coord) == self.ndim:
+            return False
+        if not all(i in range(m) for i, m in zip(coord, self.shape)):
+            return False
+        return True
+
+    def safe_cast_to_coord(self, coord) -> Tuple[int, ...]:
+        assert self.is_valid_coord(coord), f"Invalid coord for grid shape {self.shape}: {coord}"
+        return coord if isinstance(coord, tuple) else tuple(int(i) for i in coord)
+
+    def get_refined(self, s: int = 2):
+        """
+        Get a copy of the grid, up-sampled by a factor s, where s > 0 is a power of 2.
+        Integer type values are not refined beyond integer values. For example,
+        an integer axis [0, 2, 3] is refined to [0,1,2,3].
+        Returns:
+            - A new grid instance
+            - A function that maps the original coordinates to the refined coordinates
+        """
+        assert s & (s - 1) == 0, "factor must be power of 2"
+
+        mappings = []
+        refined_grid = {}
+        for name, ax in self.grid.items():
+            m = len(ax)
+            ticks = np.arange(m)
+            refined_ticks = np.linspace(0, m - 1, s * m - 1)
+            refined_ax = np.interp(refined_ticks, ticks, ax)
+            if np.issubdtype(ax.dtype, int):
+                refined_ax = np.unique(refined_ax.round().astype(int))
+                mapping = refined_ax.searchsorted(ax)
+            else:
+                mapping = s * ticks
+
+            refined_grid[name] = refined_ax
+            mappings.append(mapping)
+
+        def coord_map(coord: Tuple[int, ...]) -> Tuple[int, ...]:
+            """ map pre-refined coordinate to refined coordinate """
+            return tuple(mapping[i] for mapping, i in zip(mappings, coord))
+
+        return Grid(refined_grid), coord_map
+
+    def corner_coords(self) -> List[Tuple[int, ...]]:
+        return list(product(*((0, m - 1) for m in self.shape)))
+
+    def center_coord(self) -> Tuple[int, ...]:
+        return tuple(m // 2 for m in self.shape)
+
+    def uniform_sample_coords(self, margin: int = 0, k: int = 2) -> List[Tuple[int, ...]]:
+        """
+        samples coordinates between center to each (corner - <margin>). the number of
+        samples in each direction is determined by k; k = 0: only center,
+        k = 1: center + corner, k = 2: center + corner + mid-point, etc.
+        for a d-dim grid, returns k*(2^d) + 1 coordinates.
+        """
+        coords = [self.center_coord()]
+        center = np.array(coords[0], float)
+        for corner in self.corner_coords():
+            corner = np.fromiter((c - margin if c else margin for c in corner), float)
+            for s in range(1, k + 1):
+                vec = (corner - center) * s / k
+                coords.append(tuple(int(round(c)) for c in center + vec))
+        return coords
+
+    # ------
+
+    def coord2dict(self, coord: Sequence[int], gridlike: bool = False) -> Dict:
+        return {name: ax[i:i+1] if gridlike else ax[i]
+                for i, (name, ax) in zip(coord, self.grid.items())}
+
+    def dict2coord(self, d: Dict) -> Tuple[int, ...]:
+        tol = 100 * np.finfo(float).eps
+
+        def _index(arr, val) -> int:
+            return int(np.argmax(np.abs(arr - val) < tol))
+
+        return tuple(_index(ax, d[name]) for name, ax in self.grid.items())
+
+    def coords2inds(self, coords: Sequence[Sequence[int]]) -> np.ndarray[int]:
+        """ convert coordinates to flat indices """
+        return np.ravel_multi_index(np.asarray(coords).T, self.shape)
+
+    def inds2coords(self, inds: Sequence[int]) -> List[Tuple[int, ...]]:
+        """ convert flat indices to coordinates """
+        return list(zip(*np.unravel_index(inds, self.shape)))
+
+    # ------
+
+    def nhood_coords(self,
+                     centers: Sequence[Tuple[int, ...]] | Tuple[int, ...],
+                     vn: bool = False,
+                     include_centers: bool = True,
+                     margin: int = 0) -> List[Tuple[int, ...]]:
+
+        """
+        coordinates of neighborhoods around centers.
+        vn: True = Use Von Neumann neighborhood (4-neighborhood in 2d)
+            False (default) = Use Moore neighborhood (8-neighborhood in 2d)
+        include_centers: keep input centers in result?
+        margin: minimal valid distance from grid boundary
+        """
+
+        if isinstance(centers, Tuple): centers = [centers]
+        assert all(len(center) == self.ndim for center in centers)
+        upper_bounds = np.array(self.shape) - margin - 1
+
+        ret = set()
+        for coord in centers:
+            von_neumann_nhood = set()
+            for i, c in enumerate(coord):
+                if c > margin:
+                    von_neumann_nhood.add(coord[:i] + (c - 1,) + coord[i + 1:])
+                if c < upper_bounds[i]:
+                    von_neumann_nhood.add(coord[:i] + (c + 1,) + coord[i + 1:])
+            if vn:
+                ret.update(von_neumann_nhood)
+            else:
+                ret.update(product(*zip(*von_neumann_nhood)))
+
+        if include_centers and vn:
+            # doesnt include centers by default
+            ret.update(centers)
+        elif not include_centers and not vn:
+            # includes centers by default
+            ret.difference_update(centers)
+
+        return list(ret)
+
+    def __iter__(self):
+        """ iterate (coord, dict) pairs """
+        return ((coord, self.coord2dict(coord)) for coord in self.iter_coords())
+
+    def iter_coords(self):
+        yield from (self.inds2coords([ind])[0] for ind in range(self.total_size))
