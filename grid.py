@@ -1,6 +1,8 @@
 from typing import Dict, Tuple, Sequence, List
-from itertools import product
+from itertools import product, permutations
 import numpy as np
+
+Coord = Tuple[int, ...]
 
 
 class Grid:
@@ -8,7 +10,7 @@ class Grid:
     A multi-dim grid
     """
 
-    def __init__(self, grid: Dict | Sequence):
+    def __init__(self, grid: Dict | Sequence, step: int = 1):
         if not isinstance(grid, Dict):
             self.grid = {i: np.asarray(ax) for i, ax in enumerate(grid)}
         else:
@@ -30,7 +32,7 @@ class Grid:
             return False
         return True
 
-    def safe_cast_to_coord(self, coord) -> Tuple[int, ...]:
+    def safe_cast_to_coord(self, coord) -> Coord:
         assert self.is_valid_coord(coord), f"Invalid coord for grid shape {self.shape}: {coord}"
         return coord if isinstance(coord, tuple) else tuple(int(i) for i in coord)
 
@@ -61,19 +63,19 @@ class Grid:
             refined_grid[name] = refined_ax
             mappings.append(mapping)
 
-        def coord_map(coord: Tuple[int, ...]) -> Tuple[int, ...]:
+        def coord_map(coord: Coord) -> Coord:
             """ map pre-refined coordinate to refined coordinate """
             return tuple(mapping[i] for mapping, i in zip(mappings, coord))
 
         return Grid(refined_grid), coord_map
 
-    def corner_coords(self) -> List[Tuple[int, ...]]:
+    def corner_coords(self) -> List[Coord]:
         return list(product(*((0, m - 1) for m in self.shape)))
 
-    def center_coord(self) -> Tuple[int, ...]:
+    def center_coord(self) -> Coord:
         return tuple(m // 2 for m in self.shape)
 
-    def uniform_sample_coords(self, margin: int = 0, k: int = 2) -> List[Tuple[int, ...]]:
+    def uniform_sample_coords(self, margin: int = 0, k: int = 2) -> List[Coord]:
         """
         samples coordinates between center to each (corner - <margin>). the number of
         samples in each direction is determined by k; k = 0: only center,
@@ -95,7 +97,7 @@ class Grid:
         return {name: ax[i:i+1] if gridlike else ax[i]
                 for i, (name, ax) in zip(coord, self.grid.items())}
 
-    def dict2coord(self, d: Dict) -> Tuple[int, ...]:
+    def dict2coord(self, d: Dict) -> Coord:
         tol = 100 * np.finfo(float).eps
 
         def _index(arr, val) -> int:
@@ -107,51 +109,17 @@ class Grid:
         """ convert coordinates to flat indices """
         return np.ravel_multi_index(np.asarray(coords).T, self.shape)
 
-    def inds2coords(self, inds: Sequence[int]) -> List[Tuple[int, ...]]:
+    def inds2coords(self, inds: Sequence[int]) -> List[Coord]:
         """ convert flat indices to coordinates """
         return list(zip(*np.unravel_index(inds, self.shape)))
 
     # ------
 
-    def nhood_coords(self,
-                     centers: Sequence[Tuple[int, ...]] | Tuple[int, ...],
-                     vn: bool = False,
-                     include_centers: bool = True,
-                     margin: int = 0) -> List[Tuple[int, ...]]:
-
-        """
-        coordinates of neighborhoods around centers.
-        vn: True = Use Von Neumann neighborhood (4-neighborhood in 2d)
-            False (default) = Use Moore neighborhood (8-neighborhood in 2d)
-        include_centers: keep input centers in result?
-        margin: minimal valid distance from grid boundary
-        """
-
-        if isinstance(centers, Tuple): centers = [centers]
-        assert all(len(center) == self.ndim for center in centers)
-        upper_bounds = np.array(self.shape) - margin - 1
-
-        ret = set()
-        for coord in centers:
-            von_neumann_nhood = set()
-            for i, c in enumerate(coord):
-                if c > margin:
-                    von_neumann_nhood.add(coord[:i] + (c - 1,) + coord[i + 1:])
-                if c < upper_bounds[i]:
-                    von_neumann_nhood.add(coord[:i] + (c + 1,) + coord[i + 1:])
-            if vn:
-                ret.update(von_neumann_nhood)
-            else:
-                ret.update(product(*zip(*von_neumann_nhood)))
-
-        if include_centers and vn:
-            # doesnt include centers by default
-            ret.update(centers)
-        elif not include_centers and not vn:
-            # includes centers by default
-            ret.difference_update(centers)
-
-        return list(ret)
+    def nhood_coords(self, center: Coord, kind: str, steps: int | Sequence[int] = 1, margin: int = 0) -> List[Coord]:
+        bounds = (margin, np.array(self.shape) - margin)
+        coords = [self.safe_cast_to_coord(coord) for coord in
+                  get_neighborhood(center, kind=kind, steps=steps, bounds=bounds)]
+        return coords
 
     def __iter__(self):
         """ iterate (coord, dict) pairs """
@@ -159,3 +127,48 @@ class Grid:
 
     def iter_coords(self):
         yield from (self.inds2coords([ind])[0] for ind in range(self.total_size))
+
+
+def get_neighborhood(
+        center: Sequence[int],
+        kind: str = 'moore',
+        steps: int | Sequence[int] = 1,
+        bounds: Tuple = None) -> [np.ndarray[int], np.ndarray[int]]:
+    """
+    - Neighborhood center coordinate
+    - kind: one of {'moore', 'vonn'},
+        'moore' = Moore, full neighborhood, analogous to 8-neighborhood in 2D
+        'vonn' = Von Neumann, partial neighborhood, analogous to 4-neighborhood in 2D
+    - steps: Step sizes in each direction, given as a positive integer or list of such.
+        e.g., steps=1 <-> [-1, 0, 1], steps=[1, 3] <-> [-3, -1, 0, 1, 3]
+    - bounds: a tuple (lb, ub), where each of lb, ub is either an integer or a list of integers, same size as center.
+        a coordinate is valid if lb[i] <= coordinate[i] < ub[i] for all i.
+        if lb or ub are integer, the value is replicated to all dimensions.
+    Returns:
+        np array of valid neighborhood coordinates
+    """
+
+    if isinstance(steps, int):
+        steps = [steps]
+
+    d = len(center)
+
+    if kind == 'vonn':
+        steps = np.r_[[-s for s in steps[::-1]], steps]
+        offsets = np.zeros((d * len(steps), d), int)
+        for j in range(d):
+            offsets[j * len(steps): (j + 1) * len(steps), j] = steps
+    elif kind == 'moore':
+        steps = np.r_[[-s for s in steps[::-1]], 0, steps]
+        offsets = np.swapaxes(np.meshgrid(*(steps for _ in range(d))), -1, 0).reshape(-1, d)
+        offsets = offsets[np.any(offsets, axis=1)]
+    else:
+        raise ValueError("Unknown neighborhood kind")
+
+    coords = np.array(center) + offsets
+
+    if bounds:
+        lb, ub = bounds
+        coords = coords[np.all((coords < ub) & (coords >= lb), axis=1)]
+
+    return coords

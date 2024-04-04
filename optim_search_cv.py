@@ -1,9 +1,9 @@
-from typing import List, Dict, Tuple, Set, Collection, NamedTuple
+from typing import List, Dict, Tuple, Set, Collection
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.model_selection._search import BaseSearchCV, ParameterGrid
 from sklearn.metrics import get_scorer
-from grid import Grid
+from grid import Grid, Coord
 from dataclasses import dataclass
 
 
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 class VisitItem:
     round: int  # visits round
     reason: str  # visit reason
-    src: Tuple[int, ...] = None  # source coordinate
+    src: Coord = None  # source coordinate
     loss: float = None  # result loss
     msg: str = ''  # optional message
 
@@ -25,52 +25,31 @@ class OptimSearchCV(BaseSearchCV):
             - The direct (Von Neumann) neighborhood of best params
             - In the direction of gradient
         3. If better better params are found- repeat from 2
-           If not: refine grid and repeat from 2, or return
+           If not: reduce step size and repeat from 2, or return
     """
 
-    def __init__(self, estimator, param_grid: Dict, refinements: int = 2, **kwargs):
+    def __init__(self, estimator, param_grid: Dict, scales: int = 2, **kwargs):
         """
         param_grid: parameters grid, currently only numeric values are supported
-        refinements: number of x2 refinements when converged
+        scales: number of x2 step size scalings, must be a power of two
         """
         super().__init__(estimator, **kwargs)
 
         self.grid = Grid(param_grid)
-        self.refinements = refinements
+        self.scales = scales
 
-        self.visit_log: Dict[Tuple[int, ...], VisitItem] = {}
-        self._visited: Dict[Tuple[int, ...], float] = {}
-        self._best_coord: Tuple[int, ...] = None
-
-        self._refines: List[int] = []  # refined rounds
-        self._n_rounds = 0  # number of visit planning rounds
-
-    def _refine(self, s: int = 2) -> None:
-
-        best_loss_before_refine = self.best_loss
-        best_params_before_refine = self.best_params
-
-        # refine grid
-        refined_grid, coord_map = self.grid.get_refined(s)
-        self.grid = refined_grid
-
-        # adjust properties to refined coordinates
-        self.visit_log = {coord_map(coord): item for coord, item in self.visit_log.items()}
-        for item in self.visit_log.values():
-            item.src = coord_map(item.src) if item.src else item.src
-
-        self._refresh()
-
-        # sanity
-        assert abs(self.best_loss - best_loss_before_refine) < 1e-12
-        assert self.best_params == best_params_before_refine
+        self.visit_log: Dict[Coord, VisitItem] = {}
+        self.rounds_log: List[Dict] = []
+        self._visited: Dict[Coord, float] = {}
+        self._best_coord: Coord = None
+        self.step_size = 2 ** (scales - 1)
 
     def _refresh(self):
         self._visited = {coord: item.loss for coord, item in self.visit_log.items() if item.loss is not None}
         self._best_coord = min(self.visited, key=self.visited.get)
 
     @property
-    def visited(self) -> Dict[Tuple[int, ...], float]:
+    def visited(self) -> Dict[Coord, float]:
         return self._visited
 
     @property
@@ -78,7 +57,7 @@ class OptimSearchCV(BaseSearchCV):
         return self.grid.grid
 
     @property
-    def best_coord(self) -> Tuple[int, ...]:
+    def best_coord(self) -> Coord:
         return self._best_coord
 
     @property
@@ -89,7 +68,7 @@ class OptimSearchCV(BaseSearchCV):
     def best_params(self) -> Dict:
         return self.grid.coord2dict(self.best_coord)
 
-    def get_queue(self) -> List[Tuple[int, ...]]:
+    def get_queue(self) -> List[Coord]:
         """ list of non-visited coordinates from visit log """
         return [coord for coord in self.visit_log if coord not in self.visited]
 
@@ -119,11 +98,13 @@ class OptimSearchCV(BaseSearchCV):
     def _plan_next_visits(self, new_round: bool = True) -> None:
 
         if new_round:
-            self._n_rounds += 1
+            self.rounds_log.append({})
 
-        def _add_visit(coords: List[Tuple[int, ...]], reason: str, src: Tuple[int, ...] = None):
+        self.rounds_log[-1]['step_size'] = self.step_size
+
+        def _add_visit(coords: List[Coord], reason: str, src: Coord = None):
             for coord in set(coords).difference(self.visit_log):
-                self.visit_log[coord] = VisitItem(round=self._n_rounds, reason=reason, src=src)
+                self.visit_log[coord] = VisitItem(round=len(self.rounds_log) - 1, reason=reason, src=src)
 
         # Initialize
         if not self.visit_log:
@@ -131,7 +112,7 @@ class OptimSearchCV(BaseSearchCV):
             return
 
         # Von Neumann neighborhood of best point- preparation for gradient descent
-        nhood = self.grid.nhood_coords(self.best_coord, include_centers=False, vn=True)
+        nhood = self.grid.nhood_coords(self.best_coord, 'vonn', steps=self.step_size)
         _add_visit(nhood, reason="nhood", src=self.best_coord)
 
         # Gradient descent:
@@ -142,13 +123,12 @@ class OptimSearchCV(BaseSearchCV):
             if est_loss < self.best_loss and coord not in self.visited:
                 _add_visit([coord], reason=f"explore:loss={est_loss:2.4f}", src=center)
 
-        if not self.get_queue() and self.refinements > len(self._refines):
-            # converged (no visits were added) -> refine grid
-            self._refine()
-            self._refines.append(self._n_rounds)
+        if not self.get_queue() and self.step_size > 1:
+            # converged (no visits were added) -> halve step size
+            self.step_size //= 2
             self._plan_next_visits(new_round=False)
 
-    def gradient_descent(self, centers: Collection[Tuple[int, ...]]) -> Dict:
+    def gradient_descent(self, centers: Collection[Coord]) -> Dict:
         """
         centers: coordinates to perform GD around
 
@@ -161,7 +141,7 @@ class OptimSearchCV(BaseSearchCV):
         gd = {}
         for center in centers:
 
-            partial_nhood = self.grid.nhood_coords(center, vn=True, include_centers=False)
+            partial_nhood = self.grid.nhood_coords(center, 'vonn', steps=self.step_size)
             if not set(partial_nhood).issubset(self.visited):
                 continue
 
@@ -170,16 +150,16 @@ class OptimSearchCV(BaseSearchCV):
 
             losses = np.zeros((self.grid.ndim, 3), float) + np.inf  # loss per offsets step in each axis
             losses[:, 1] = self.visited[center]  # middle column corresponds to zero offset
-            offsets = np.array(partial_nhood) - center
-            for coord, offset in zip(partial_nhood, offsets):
-                d = np.nonzero(offset)[0]  # axis of offset
-                losses[d, offset[d] + 1] = self.visited[coord]
+            directions = np.sign(np.array(partial_nhood) - center)
+            for coord, direction in zip(partial_nhood, directions):
+                d = np.nonzero(direction)[0]  # axis of offset
+                losses[d, direction[d] + 1] = self.visited[coord]
 
             # ---
             # take best offset from each axis:
 
-            best_combined_offset = np.argmin(losses, axis=1) - 1
-            coord = tuple(np.array(center) + best_combined_offset)
+            best_combined_direction = np.argmin(losses, axis=1) - 1
+            coord = tuple(np.array(center) + best_combined_direction * self.step_size)
             gd[center] = (coord, float(losses.mean()))
 
         return gd
@@ -190,9 +170,7 @@ class OptimSearchCV(BaseSearchCV):
         for coord, item in self.visit_log.items():
             if item.round != prev_round:
                 prev_round = item.round
-                print(f"Round {item.round}:")
-                if item.round in self._refines:
-                    print(f"!Refined grid -> x{2 * 2 ** self._refines.index(item.round)}")
+                print(f"Round {item.round} (Step size {self.rounds_log[item.round]['step_size']}):")
             s = {'round': item.round,
                  'reason': item.reason,
                  'src': str(item.src) if item.src else "",
@@ -237,7 +215,7 @@ class OptimSearchCV(BaseSearchCV):
                 plt.text(coord[0], coord[1], txt, color=colors[(item.round - 1) % len(colors)])
 
         _, _, loss_name = self._loss_metric_spec()
-        rounds_to_draw = [self._n_rounds] if latest_only else range(self._n_rounds + 1)
+        rounds_to_draw = [len(self.rounds_log) - 1] if latest_only else range(len(self.rounds_log))
         for visit_round in rounds_to_draw:
             coords = [coord for coord in self.visited if self.visit_log[coord].round <= visit_round]
             _draw(coords)
