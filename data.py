@@ -63,7 +63,8 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
     # Finalize:
 
     steps.append(prop_setter)
-    steps.append(TargetSeparator(target_col=config['target_col']))
+    steps.append(TargetSeparator(target_col=config['target_col'],
+                                 sanity_mode=config['data.sanity_mode']))
 
     pipe = Pipeline(steps=[(step.name, step) for step in steps])
     print("Data prep pipe:")

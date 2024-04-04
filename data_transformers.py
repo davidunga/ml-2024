@@ -302,7 +302,7 @@ class TargetSeparator(DataTransformer):
             X = X.drop(self.target_col, axis=1)
 
         if self.sanity_mode == 'must_fail':
-            y = np.random.default_rng(0).permutation(y)
+            y = y.iloc[np.random.default_rng(0).permutation(len(y))]
             print("! sanity_mode=", self.sanity_mode, "-> Shuffled target labels.")
 
         return X, y
