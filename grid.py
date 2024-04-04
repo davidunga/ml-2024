@@ -10,13 +10,14 @@ class Grid:
     A multi-dim grid
     """
 
-    def __init__(self, grid: Dict | Sequence, step: int = 1):
+    def __init__(self, grid: Dict | Sequence):
         if not isinstance(grid, Dict):
             self.grid = {i: np.asarray(ax) for i, ax in enumerate(grid)}
         else:
             self.grid = {name: np.asarray(ax) for name, ax in grid.items()}
         for ax in self.grid.values():
-            assert np.all(np.diff(ax) > 0), "Axis values must be sorted in ascending order"
+            if np.issubdtype(ax.dtype, np.number):
+                assert np.all(np.diff(ax) > 0), "Numeric values must be sorted in ascending order"
         self.shape = tuple(len(ax) for ax in self.grid.values())
         self.total_size = int(np.prod(self.shape))
         self.ndim = len(self.grid)
@@ -88,7 +89,7 @@ class Grid:
             corner = np.fromiter((c - margin if c else margin for c in corner), float)
             for s in range(1, k + 1):
                 vec = (corner - center) * s / k
-                coords.append(tuple(int(round(c)) for c in center + vec))
+                coords.append(self.safe_cast_to_coord(np.round(center + vec)))
         return coords
 
     # ------
@@ -133,34 +134,28 @@ def get_neighborhood(
         center: Sequence[int],
         kind: str = 'moore',
         steps: int | Sequence[int] = 1,
-        bounds: Tuple = None) -> [np.ndarray[int], np.ndarray[int]]:
+        bounds: Tuple = None) -> np.ndarray[int]:
     """
-    - Neighborhood center coordinate
+    - center: coordinate at the center of the neighborhood
     - kind: one of {'moore', 'vonn'},
         'moore' = Moore, full neighborhood, analogous to 8-neighborhood in 2D
         'vonn' = Von Neumann, partial neighborhood, analogous to 4-neighborhood in 2D
-    - steps: Step sizes in each direction, given as a positive integer or list of such.
-        e.g., steps=1 <-> [-1, 0, 1], steps=[1, 3] <-> [-3, -1, 0, 1, 3]
+    - steps: step size as positive integer, or as list of step sizes for each dimension (same size as center)
     - bounds: a tuple (lb, ub), where each of lb, ub is either an integer or a list of integers, same size as center.
         a coordinate is valid if lb[i] <= coordinate[i] < ub[i] for all i.
         if lb or ub are integer, the value is replicated to all dimensions.
     Returns:
-        np array of valid neighborhood coordinates
+        np array of neighborhood coordinates
     """
 
-    if isinstance(steps, int):
-        steps = [steps]
-
     d = len(center)
+    if isinstance(steps, int):
+        steps = [steps] * d
 
     if kind == 'vonn':
-        steps = np.r_[[-s for s in steps[::-1]], steps]
-        offsets = np.zeros((d * len(steps), d), int)
-        for j in range(d):
-            offsets[j * len(steps): (j + 1) * len(steps), j] = steps
+        offsets = np.vstack((np.diag(steps), -np.diag(steps)))
     elif kind == 'moore':
-        steps = np.r_[[-s for s in steps[::-1]], 0, steps]
-        offsets = np.swapaxes(np.meshgrid(*(steps for _ in range(d))), -1, 0).reshape(-1, d)
+        offsets = np.swapaxes(np.meshgrid(*[[-s, 0, s] for s in steps]), -1, 0).reshape(-1, d)
         offsets = offsets[np.any(offsets, axis=1)]
     else:
         raise ValueError("Unknown neighborhood kind")

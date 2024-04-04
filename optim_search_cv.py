@@ -69,6 +69,10 @@ class OptimSearchCV(BaseSearchCV):
     def best_params(self) -> Dict:
         return self.grid.coord2dict(self.best_coord)
 
+    def _step_size_per_axs(self) -> np.ndarray[int]:
+        return np.fromiter((self.step_size if np.issubdtype(ax.dtype, np.number) else 1
+                            for ax in self.grid.grid.values()), int)
+
     def get_queue(self) -> List[Coord]:
         """ list of non-visited coordinates from visit log """
         return [coord for coord in self.visit_log if coord not in self.visited]
@@ -142,7 +146,7 @@ class OptimSearchCV(BaseSearchCV):
         gd = {}
         for center in centers:
 
-            partial_nhood = self.grid.nhood_coords(center, 'vonn', steps=self.step_size)
+            partial_nhood = self.grid.nhood_coords(center, 'vonn', steps=self._step_size_per_axs())
             if not set(partial_nhood).issubset(self.visited):
                 continue
 
@@ -160,7 +164,7 @@ class OptimSearchCV(BaseSearchCV):
             # take best offset from each axis:
 
             best_combined_direction = np.argmin(losses, axis=1) - 1
-            coord = tuple(np.array(center) + best_combined_direction * self.step_size)
+            coord = tuple(np.array(center) + best_combined_direction * self._step_size_per_axs())
             gd[center] = (coord, float(losses.mean()))
 
         return gd
