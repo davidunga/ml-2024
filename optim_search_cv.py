@@ -28,7 +28,7 @@ class OptimSearchCV(BaseSearchCV):
            If not: reduce step size and repeat from 2, or return
     """
 
-    def __init__(self, estimator, param_grid: Dict, scales: int = 2, **kwargs):
+    def __init__(self, estimator, param_grid: Dict, scales: int = 2, visualize: bool = False, **kwargs):
         """
         param_grid: parameters grid, currently only numeric values are supported
         scales: number of x2 step size scalings, must be a power of two
@@ -37,6 +37,7 @@ class OptimSearchCV(BaseSearchCV):
 
         self.grid = Grid(param_grid)
         self.scales = scales
+        self.visualize = visualize
 
         self.visit_log: Dict[Coord, VisitItem] = {}
         self.rounds_log: List[Dict] = []
@@ -237,7 +238,8 @@ class OptimSearchCV(BaseSearchCV):
             result = evaluate_candidates(ParameterGrid(candidates))
             self.process_visit_result(result)
             self.tell_visits_history()
-            self.visualize_visits(latest_only=True)
-            plt.show()
+            if self.visualize:
+                self.visualize_visits(latest_only=True)
+                plt.show()
 
         print("DONE")

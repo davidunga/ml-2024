@@ -54,32 +54,32 @@ balance_grid = {
 model_grids = {
     'XGBClassifier': {
         'base_grid': {
-            'max_depth': [2, 4, 6, 8, 10],
-            'learning_rate': np.array([1e-4, 1e-3, 1e-2, 1e-1, 1, 10, 100])
+            'max_depth': np.arange(2, 10),
+            'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
         },
         'fine_grid': {
-            'min_child_weight': np.arange(2, 10, 2),
-            'gamma': np.linspace(0, .5, 4),
-            'subsample': [.4, .7, 1.],
-            'colsample_bytree': [.6, 1.],
-            'reg_alpha': [1e-5, 1e-3, 1e-2, 1, 1e2],
-            'reg_lambda': [1e-5, 1e-3, 1e-2, 1, 1e2],
+            'min_child_weight': np.arange(2, 10),
+            'gamma': np.linspace(0, .5, 16),
+            'subsample':  np.linspace(.4, 1., 16),
+            'colsample_bytree': np.linspace(.6, 1., 16),
+            'reg_alpha': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
+            'reg_lambda': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
         }
     },
     'LGBMClassifier': {
         'base_grid': {
-            'max_depth': np.arange(2, 10, 2),
-            'learning_rate': np.array([1e-4, 1e-3, 1e-2, 1e-1, 1, 10, 100])
+            'max_depth': np.arange(2, 10),
+            'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
         },
         'fine_grid': {
-            'min_child_weight': np.arange(2, 10, 2),
-            'subsample': [.4, .7, 1.],
+            'min_child_weight': np.arange(2, 10),
+            'subsample':  np.linspace(.4, 1., 16),
         }
     },
     'CatBoostClassifier': {
         'base_grid': {
-            'max_depth': np.arange(2, 10, 2),
-            'learning_rate': np.array([1e-4, 1e-3, 1e-2, 1e-1, 1, 10, 100])
+            'max_depth': np.arange(2, 10),
+            'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
         },
         'fine_grid': {
             'bagging_temperature': [0, .5, 1, 5],
@@ -159,9 +159,13 @@ def cv_search_model(config: Dict):
         base_grid = model_grids[estimator_name]['base_grid']
         fine_grid = model_grids[estimator_name]['fine_grid']
 
-        DEV = True
+        #base_grid.update(fine_grid)
+
+        DEV = False
         if DEV:
             print("!! Running in DEV mode !!")
+            if config['cv.searcher'] == 'OptimSearchCV':
+                cv_args['visualize'] = True
             # base_grid = _reduce_grid(base_grid)
             # fine_grid = _reduce_grid(fine_grid)
 
