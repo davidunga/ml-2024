@@ -14,6 +14,7 @@ class VisitItem:
     src: Coord = None  # source coordinate
     loss: float = None  # result loss
     msg: str = ''  # optional message
+    scores: Dict[str, float] = None
 
 
 class OptimSearchCV(BaseSearchCV):
@@ -87,10 +88,12 @@ class OptimSearchCV(BaseSearchCV):
         loss_metric, loss_sign, _ = self._loss_metric_spec()
         losses = loss_sign * result[loss_metric]
         params_list = result['params']
-        for params, loss in zip(params_list, losses):
+        for i, (params, loss) in enumerate(zip(params_list, losses)):
             coord = self.grid.dict2coord(params)
             if self.visit_log[coord].loss is None:
                 self.visit_log[coord].loss = loss
+                self.visit_log[coord].scores = {k.replace('mean_test_', ''): float(v[i])
+                                                for k, v in result.items() if k.startswith('mean_test_')}
 
         self._refresh()
         self.visit_log[self.best_coord].msg = 'NewBest'
@@ -181,8 +184,9 @@ class OptimSearchCV(BaseSearchCV):
                  'src': str(item.src) if item.src else "",
                  'msg': f"-> {item.msg}" if item.msg else "",
                  'loss': round(self.visited[coord], 4) if coord in self.visited else "<pending>",
+                 'roc_auc': round(item.scores['roc_auc'], 4) if coord in self.visited else "<pending>",
                  'coord': coord}
-            print("{coord} round:{round}, reason:{reason}{src} loss: {loss} {msg}".format(**s))
+            print("{coord} round:{round}, reason:{reason}{src} roc_auc={roc_auc} loss={loss} {msg}".format(**s))
 
     def visualize_visits(self, latest_only: bool):
         import matplotlib.pyplot as plt
