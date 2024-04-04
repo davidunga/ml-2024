@@ -20,10 +20,17 @@ def process_result(config: Dict, cv: BaseSearchCV):
 
 def make_result_dict(config: Dict, cv: BaseSearchCV) -> Dict:
     estimator_name = cv.estimator.__class__.__name__
-    df = pd.DataFrame({"estimator_name": estimator_name, **cv.cv_results_, "config": json.dumps(config)})
+    searchcv_name = cv.__class__.__name__
+    df = pd.DataFrame({
+        "estimator_name": estimator_name,
+        "searchcv_name": searchcv_name,
+        **cv.cv_results_,
+        "config": json.dumps(config)
+    })
     res = {
         'df': df,
         'config': config,
+        'searchcv_name': searchcv_name,
         'estimator_name': estimator_name,
         'best_estimator': cv.best_estimator_,
         'best_params': cv.best_params_,
@@ -45,7 +52,7 @@ def display(result_dict: Dict):
 
 def save(result_dict: Dict):
     config_name = get_config_name(result_dict['config'])
-    fname = f"{result_dict['estimator_name']} {config_name}"
+    fname = f"{result_dict['estimator_name']} {result_dict['searchcv_name']} {config_name}"
 
     results_csv = paths.CV_RESULTS_PATH / (fname + ".csv")
     results_csv.parent.mkdir(exist_ok=True, parents=True)

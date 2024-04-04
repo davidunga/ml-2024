@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import object_builder
@@ -6,22 +7,18 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 import imblearn as imbl
-from typing import List, Dict, Tuple
+from copy import deepcopy
+from typing import List, Dict, Tuple, Sequence, Set
 from collections import defaultdict
-
-
-def unpack_args(X, y):
-    if isinstance(X, tuple):
-        assert y is None and len(X) == 2
-        return X
-    return X, y
+from itertools import product
 
 
 class DataTransformer(BaseEstimator, TransformerMixin):
 
-    prop_setter = None
-    frozen: bool = False  # if true, fit() does nothing
-    
+    verbose: int = 0        # verbosity level
+    prop_setter = None      # place holder for PropertySetter instance
+    frozen: bool = False    # if true, fit() does nothing
+
     def _fit(self, *args):
         return self
 
@@ -48,16 +45,21 @@ class PropertySetter(DataTransformer):
 
     _PROPS = {'num': 'float', 'cat': 'category', 'drop': 'drop'}
 
-    def __init__(self, default: str = None, verbose: int = 1):
+    def __init__(self, default: str = None):
         self.props = {}
         self.default = default
-        self.verbose = verbose
 
     def register(self, **kwargs):
+        """
+        add columns' properties, usage:
+            register(cat=list_of_categorical_columns, drop=list_of_columns_to_drop, ..)
+        """
         for prop, cols in kwargs.items():
             assert prop in self._PROPS
             for col in cols:
                 if col not in self.props or prop == 'drop':
+                    # verify column is not already registered, unless the new
+                    # registration is 'drop', which overrides any other property
                     self.props[col] = prop
                 else:
                     assert self.props[col] in (prop, 'drop')
@@ -147,11 +149,13 @@ class Standardizer(DataTransformer):
 
 class Balancer(DataTransformer):
     """ wrapper for data balancing classes
-        provides a transformer-like api and manages sampling from train/test splits
+        provides a transformer-like api, and manages sampling from train/test splits;
+        training set is balanced, test/validation sets are not
     """
 
     _required_params = ['random_state']  # require even if sampler has a default value
     _dataframe_input = ['SMOTENC']  # samplers that allow or require dataframe input
+    _sampler_modules = [imbl.under_sampling, imbl.over_sampling, imbl.combine]
 
     # @TODO add SDV
 
@@ -162,9 +166,12 @@ class Balancer(DataTransformer):
             self._get_new_sampler()  # verify we're good to go
 
     def _get_new_sampler(self):
-        sampler_class = object_builder.get_class(self.method, [imbl.under_sampling, imbl.over_sampling, imbl.combine])
-        params = {k: object_builder.get_instance(**v) if k == 'estimator' and v is not None else v
-                  for k, v in self.params.items()}
+
+        params = deepcopy(self.params)
+        if self.params.get('estimator', None) is not None:
+            params['estimator'] = object_builder.get_instance(**self.params['estimator'])
+
+        sampler_class = object_builder.get_class(self.method, self._sampler_modules)
         sampler = sampler_class(**params)
         for param in self._required_params:
             if hasattr(sampler, param) and param not in self.params:
@@ -305,24 +312,28 @@ class ICDConverter(DataTransformer):
     """ Group ICD category levels """
 
     ICD_GROUPS = {
-        1: range(0, 140), 2: range(140, 240), 3: range(240, 280), 4: range(280, 290), 5: range(290, 320),
-        6: range(320, 390), 7: range(390, 460), 8: range(460, 520), 9: range(520, 580), 10: range(580, 630),
-        11: range(630, 680), 12: range(680, 710), 13: range(710, 740), 14: range(740, 760),
-        15: range(760, 780), 16: range(780, 800), 17: range(800, 1000), 18: ['E'], 19: ['V'], 0: ['nan']
+        1: (0, 140), 2: (140, 240), 3: (240, 280), 4: (280, 290), 5: (290, 320),
+        6: (320, 390), 7: (390, 460), 8: (460, 520), 9: (520, 580), 10: (580, 630),
+        11: (630, 680), 12: (680, 710), 13: (710, 740), 14: (740, 760),
+        15: (760, 780), 16: (780, 800), 17: (800, 1000), 18: ['E'], 19: ['V'], 0: ['nan']
     }
     PREGNANCY_DIABETES_ICD = 648.8
 
     def __init__(self, features: List):
-        self.lookup = {value: key for key, values_list in self.ICD_GROUPS.items() for value in values_list}
+        self.lookup = {value: key for key, values in self.ICD_GROUPS.items()
+                       for value in (range(*values) if isinstance(values, tuple) else values)}
         self.features = features
 
     def _convert_value(self, value):
         if not isinstance(value, str):
+            # nan -> 'nan'
             assert np.isnan(value)
             normalized_value = 'nan'
         elif value[0] in ('E', 'V'):
+            # 'E<subGroup>' / 'V<subGroup>' -> 'E' / 'V'
             normalized_value = value[0]
         else:
+            # '<mainGroup>.<subGroup>' -> mainGroup
             normalized_value = int(value.split('.')[0])
         return self.lookup[normalized_value]
 
@@ -444,3 +455,12 @@ class AddFeatureEncounter(DataTransformer):
         X.loc[X['A1Cresult'] == 'Norm', 'encounter'] = 'Norm'
         self.prop_setter.register(cat=['encounter'], drop=['A1Cresult'])
         return X
+
+
+# ---------------
+
+def unpack_args(X, y):
+    if isinstance(X, tuple):
+        assert y is None and len(X) == 2
+        return X
+    return X, y

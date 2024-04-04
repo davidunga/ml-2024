@@ -20,8 +20,9 @@ _default_config = {
     'data.sanity_mode': 'none',
     'data.test_size': .2,
 
+    'cv.searcher': 'RandomizedSearchCV',
     'cv.n_folds': 5,
-    'cv.scores': ['balanced_accuracy', 'roc_auc', 'f1', 'precision', 'recall'],
+    'cv.scores': ['balanced_accuracy', 'roc_auc', 'f1', 'precision', 'recall'], # loss
     'cv.main_score': 'roc_auc',
 
     'cv.base.val_size': .2,
