@@ -71,7 +71,7 @@ class OptimSearchCV(BaseSearchCV):
         return self.grid.coord2dict(self.best_coord)
 
     def _step_size_per_axs(self) -> np.ndarray[int]:
-        return np.fromiter((self.step_size if np.issubdtype(ax.dtype, np.number) else 1
+        return np.fromiter((max(1, min(self.step_size, len(ax) - 1)) if np.issubdtype(ax.dtype, np.number) else 1
                             for ax in self.grid.grid.values()), int)
 
     def get_queue(self) -> List[Coord]:

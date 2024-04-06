@@ -79,7 +79,7 @@ def build_cv_pipe(config: Dict, full_Xy) -> Pipeline:
     onehot_converter.frozen = True  # prevent re-fitting during train
 
     standardizer = Standardizer(**config['data.standardize'])
-    balancer = Balancer(**config['balance'])
+    balancer = Balancer(method=config['balance.method'], params=config['balance.params'])
 
     if balancer.is_dataframe_in:
         steps = [standardizer, balancer, onehot_converter]
@@ -109,7 +109,7 @@ def load_data(config: Dict) -> pd.DataFrame:
     return df
 
 
-def stratified_split(Xy, test_size, random_state: int):
+def stratified_split(Xy, test_size, seed: int):
     X_train, X_test, y_train, y_test = train_test_split(
-        *Xy, test_size=test_size, shuffle=True, random_state=random_state, stratify=Xy[1])
+        *Xy, test_size=test_size, shuffle=True, random_state=seed, stratify=Xy[1])
     return (X_train, y_train), (X_test, y_test)

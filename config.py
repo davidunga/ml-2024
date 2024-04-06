@@ -15,23 +15,23 @@ _default_config = {
                      'number_inpatient', 'number_diagnoses', 'weight'],
 
     'random_state': 1337,
-    'finetune': False,
+    'fine_tune': True,
+    'estimator': 'XGBClassifier',
 
     'data.sanity_mode': 'none',
     'data.test_size': .2,
 
-    'cv.searcher': 'RandomizedSearchCV',
+    'cv.base.searcher': 'GridSearchCV',
+    'cv.fine.searcher': 'RandomizedSearchCV',
     'cv.n_folds': 5,
     'cv.scores': ['balanced_accuracy', 'roc_auc', 'f1', 'precision', 'recall', 'neg_log_loss'],
     'cv.main_score': 'roc_auc',
 
-    'cv.base.val_size': .2,
+    'cv.early_stopping_eval_size': .2,
     'cv.base.early_stopping_rounds': 5,
 
-    'balance': {
-        'method': 'RandomUnderSampler',
-        'params': {'random_state': FROM_CONFIG}
-    },
+    'balance.method': 'RandomUnderSampler',
+    'balance.params': {'random_state': FROM_CONFIG},
 
     'data.standardize': {
         'default_transform': 'sqrt',
@@ -117,9 +117,12 @@ def get_default_config() -> Dict:
 
 def get_config_name(config: Dict) -> str:
     hash_ = md5(json.dumps(config).encode()).hexdigest()[:4]
-    name = f"{config['balance']['method']} seed{config['random_state']} {hash_}"
-    if config['finetune']:
-        name += " TUNED"
+    estimator = config['estimator'].replace('Classifier', '').replace('Boost', 'B')
+    cv_searcher = config['cv.fine.searcher'] if config['fine_tune'] else config['cv.base.searcher']
+    balance = 'NoBalance' if config['balance.method'] == 'none' else config['balance.method']
+    stage = "TUNED" if config['fine_tune'] else "BASE"
+    by = config['cv.main_score'].split('_')[-1]
+    name = f"{estimator} {cv_searcher} {balance} {stage} {by[:min(4, len(by))]} s{config['random_state']} {hash_}"
     return name
 
 

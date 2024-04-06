@@ -1,11 +1,10 @@
 from sklearn.experimental import enable_halving_search_cv  # required
-from sklearn.model_selection import GridSearchCV, HalvingGridSearchCV, RandomizedSearchCV, StratifiedKFold
-from sklearn.ensemble import RandomForestClassifier
+from sklearn import model_selection
 import paths
 from optim_search_cv import OptimSearchCV
 from copy import deepcopy
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
-from config import get_default_config, inherit_from_config, FROM_CONFIG
+from config import get_default_config, inherit_from_config, FROM_CONFIG, get_config_name
 import pandas as pd
 from typing import Dict, List, Tuple
 import object_builder
@@ -16,18 +15,21 @@ from pipe_cross_val import set_pipecv
 import os
 os.environ['PYTHONWARNINGS'] = 'ignore'
 
-cv_searchers = {
-    'OptimSearchCV': OptimSearchCV,
-    'RandomizedSearchCV': RandomizedSearchCV,
-    'GridSearchCV': GridSearchCV
-}
+# -------
 
 config_grid = {
-    'cv.searcher': ['OptimSearchCV', 'RandomizedSearchCV'],
+    'estimator': ['XGBClassifier', 'LGBMClassifier', 'CatBoostClassifier'],
+    'cv.base.searcher': ['GridSearchCV'],
+    'cv.fine.searcher': ['OptimSearchCV', 'RandomizedSearchCV'],
+    'balance.method': ['none', 'SMOTENC', 'NearMiss', 'InstanceHardnessThreshold'],
     'random_state': [1337]
 }
 
-balance_grid = {
+# -------
+# params grid for each balancer
+# included balancers are defined in config_grid
+
+balance_params_grid = {
     'none': {
     },
     'RandomUnderSampler': {
@@ -50,14 +52,19 @@ balance_grid = {
     }
 }
 
+# -------
+# params grid for each estimator
+# included estimator are defined in config_grid
 
-model_grids = {
+_common_base_grid = {
+    'max_depth': np.arange(2, 10),
+    'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
+}
+
+estimator_params_grids = {
     'XGBClassifier': {
-        'base_grid': {
-            'max_depth': np.arange(2, 10),
-            'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
-        },
-        'fine_grid': {
+        'base': _common_base_grid,
+        'fine': {
             'min_child_weight': np.arange(2, 10),
             'gamma': np.linspace(0, .5, 16),
             'subsample':  np.linspace(.4, 1., 16),
@@ -67,25 +74,21 @@ model_grids = {
         }
     },
     'LGBMClassifier': {
-        'base_grid': {
-            'max_depth': np.arange(2, 10),
-            'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
-        },
-        'fine_grid': {
+        'base': _common_base_grid,
+        'fine': {
             'min_child_weight': np.arange(2, 10),
             'subsample':  np.linspace(.4, 1., 16),
         }
     },
     'CatBoostClassifier': {
-        'base_grid': {
-            'max_depth': np.arange(2, 10),
-            'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
-        },
-        'fine_grid': {
-            'bagging_temperature': [0, .5, 1, 5],
+        'base': _common_base_grid,
+        'fine': {
+            'bagging_temperature': [0, .25, .5, .75, 1, 2, 5],
         }
     }
 }
+
+# -------
 
 
 def get_best_iteration(estimator):
@@ -106,110 +109,95 @@ def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
         yield result
 
 
-def cv_search_model_and_config(finetune: bool):
-    """ cv-search models and configurations """
-
-    default_config = get_default_config()
-    default_config['finetune'] = finetune
-
-    for config in yield_from_grid(grid_dict=config_grid, default_dict=default_config):
-        # for each configuration in grid..
-
-        # further adjust configuration according to balancing params..
-        for balance_method, balance_params_grid in balance_grid.items():
-            for balance_params in yield_from_grid(balance_params_grid):
-
-                config['balance'] = {
-                    'method': balance_method,
-                    'params': inherit_from_config(balance_params, config)
-                }
-
-                # search best model with this configuration
-                cv_search_model(config)
+def cv_search(fine_tune: bool):
+    base_config = get_default_config()
+    base_config['fine_tune'] = fine_tune
+    for config in yield_from_grid(grid_dict=config_grid, default_dict=base_config):
+        for balance_params in yield_from_grid(balance_params_grid[config['balance.method']]):
+            config['balance.params'] = inherit_from_config(balance_params, config)
+            cv_search_estimator_params(config)
 
 
-def cv_search_model(config: Dict):
-    """ cv-search a model for a given configuration """
+def cv_search_estimator_params(config: Dict):
+    """ cv-search estimator params for a given configuration """
 
-    cv_searcher = cv_searchers[config['cv.searcher']]
-
+    DEV = False
     seed = config['random_state']
-    cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'],
-               'verbose': 0, 'refit': config['cv.main_score'],
-               'return_train_score': True, 'n_jobs': -1}
 
-    if 'random' in cv_searcher.__name__.lower():
-        cv_args['random_state'] = seed
-        grid_kw = 'param_distributions'
-    else:
-        grid_kw = 'param_grid'
+    cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'], 'verbose': 0,
+               'refit': config['cv.main_score'], 'return_train_score': True, 'n_jobs': -1}
 
+    # -----
+    # prepare datasets:
+
+    # load and prep full data
     raw_data = load_data(config)
-    prep_pipe = build_data_prep_pipe(config)
+    prep_pipe = build_data_prep_pipe(config)  # doesn't include standardizing, balancing, and one-hotting
     Xy = prep_pipe.fit_transform(raw_data)
-    cv_pipe = build_cv_pipe(config, Xy)
 
-    Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], random_state=seed)
-    Xy_base_train, Xy_base_val = stratified_split(Xy_train, test_size=config['cv.base.val_size'], random_state=seed)
-    Xy_base_val = cv_pipe.fit(Xy_base_train).transform(Xy_base_val)
+    # build pipe that goes into the cross validation (=standardizing, balancing, one-hotting)
+    cv_pipe = build_cv_pipe(config, Xy)  # Xy is used to initialize the onehot encoder
 
-    for estimator_name in model_grids:
+    def _run_search(params: Dict, is_fine_tune: bool):
 
-        estimator_class = object_builder.get_class(estimator_name)
-        base_grid = model_grids[estimator_name]['base_grid']
-        fine_grid = model_grids[estimator_name]['fine_grid']
+        stage = 'fine' if is_fine_tune else 'base'
 
-        #base_grid.update(fine_grid)
+        # -----
+        # split data
 
-        DEV = False
+        param_grid = estimator_params_grids[config['estimator']][stage]
+
+        Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], seed=seed)
+
+        if not params.get('early_stopping_rounds', None):
+            eval_set = []
+        else:
+            # make eval set for early stopping
+            Xy_train, Xy_eval = stratified_split(Xy_train, test_size=config['cv.early_stopping_eval_size'], seed=seed)
+            eval_set = [cv_pipe.fit(Xy_train).transform(Xy_eval)]  # eval set isn't passed through cv-pipe
+
+        # -----
+        # initialize search:
+
+        estimator = object_builder.get_class(config['estimator'])(**params)
+        cv_searcher = object_builder.get_class(config[f'cv.{stage}.searcher'], [model_selection, OptimSearchCV])
+
         if DEV:
-            print("!! Running in DEV mode !!")
-            if config['cv.searcher'] == 'OptimSearchCV':
+            print("\n\n !! Running in DEV mode !! \n\n")
+            #param_grid = _reduce_grid(param_grid)
+            if cv_searcher.__name__ == "OptimSearchCV":
                 cv_args['visualize'] = True
-            # base_grid = _reduce_grid(base_grid)
-            # fine_grid = _reduce_grid(fine_grid)
+
+        try:
+            cv_searcher = cv_searcher(estimator, random_state=seed, param_distributions=param_grid, **cv_args)
+        except TypeError:
+            cv_searcher = cv_searcher(estimator, param_grid=param_grid, **cv_args)
+
+        set_pipecv(cv_searcher, cv_pipe)
 
         # -----
-        # base:
+        # search:
 
-        print(estimator_name, "- Searching base params...")
-        cv_args[grid_kw] = base_grid
-        cv = cv_searcher(estimator_class(
-            early_stopping_rounds=config['cv.base.early_stopping_rounds'],
-            random_state=seed), **cv_args)
-        set_pipecv(cv, cv_pipe)
+        print("\n\n ------ ")
+        print("Starting search for:", get_config_name(config))
+        print(f"  Grid shape={tuple(len(ax) for ax in param_grid)}, size={np.prod([len(ax) for ax in param_grid])}")
+        print(f"  Estimator params: {params}")
+        print("\n\n")
 
-        cv.fit(*Xy_base_train, eval_set=[Xy_base_val])
+        cv_searcher.fit(*Xy_train, eval_set=eval_set)
+        params = cv_searcher.best_params_
+        params['n_estimators'] = get_best_iteration(cv_searcher.best_estimator_)
 
-        params = cv.best_params_
-        params['n_estimators'] = get_best_iteration(cv.best_estimator_)
+        config_ = deepcopy(config)
+        config_['fine_tune'] = is_fine_tune
+        cv_result_manager.process_result(config_, cv_searcher, save=not DEV)
 
-        print(estimator_name + ":")
-        print(" Best base params:", params)
-        print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
+        return params
 
-        # -----
-        # fine tune:
-
-        if config['finetune']:
-
-            print(estimator_name, "- Fine tuning...")
-            cv_args[grid_kw] = fine_grid
-            cv = cv_searcher(estimator_class(**params, random_state=seed), **cv_args)
-            set_pipecv(cv, cv_pipe)
-
-            cv.fit(*Xy_train)
-
-            params = {**cv.best_params_, **params}
-            print(estimator_name + ":")
-            print(" Best fine-tuned params:", cv.best_params_)
-            print(f" Score ({cv.refit}): {cv.best_score_:2.3f}")
-
-        # -----
-        # finalize
-
-        if not DEV:
-            cv_result_manager.process_result(config, cv)
+    params = {'random_state': seed, 'early_stopping_rounds': config['cv.base.early_stopping_rounds']}
+    params = _run_search(params, is_fine_tune=False)
+    if config['fine_tune']:
+        _run_search(params, is_fine_tune=True)
 
 
 def _reduce_grid(grid: Dict) -> Dict:
@@ -217,4 +205,4 @@ def _reduce_grid(grid: Dict) -> Dict:
 
 
 if __name__ == "__main__":
-    cv_search_model_and_config(finetune=False)
+    cv_search(fine_tune=True)

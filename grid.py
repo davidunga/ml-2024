@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Sequence, List
+from typing import Dict, Tuple, Sequence, List, Iterator
 from itertools import product, permutations
 import numpy as np
 
@@ -7,7 +7,7 @@ Coord = Tuple[int, ...]
 
 class Grid:
     """
-    A multi-dim grid
+    A multi-dim grid with associated values
     """
 
     def __init__(self, grid: Dict | Sequence):
@@ -26,16 +26,11 @@ class Grid:
     def ax_names(self) -> List:
         return list(self.grid)
 
-    def is_valid_coord(self, coord) -> bool:
-        if not len(coord) == self.ndim:
-            return False
-        if not all(i in range(m) for i, m in zip(coord, self.shape)):
-            return False
-        return True
-
-    def safe_cast_to_coord(self, coord) -> Coord:
-        assert self.is_valid_coord(coord), f"Invalid coord for grid shape {self.shape}: {coord}"
-        return coord if isinstance(coord, tuple) else tuple(int(i) for i in coord)
+    def safe_cast_to_coord(self, coord: Sequence) -> Coord:
+        assert len(coord) == self.ndim
+        casted = tuple(int(i) for i in coord)
+        assert all(i == j for i, j in zip(coord, casted))
+        return casted
 
     def get_refined(self, s: int = 2):
         """
@@ -70,8 +65,8 @@ class Grid:
 
         return Grid(refined_grid), coord_map
 
-    def corner_coords(self) -> List[Coord]:
-        return list(product(*((0, m - 1) for m in self.shape)))
+    def iter_corner_coords(self) -> Iterator[Coord]:
+        return product(*((0, m - 1) for m in self.shape))
 
     def center_coord(self) -> Coord:
         return tuple(m // 2 for m in self.shape)
@@ -84,8 +79,8 @@ class Grid:
         for a d-dim grid, returns k*(2^d) + 1 coordinates.
         """
         coords = [self.center_coord()]
-        center = np.array(coords[0], float)
-        for corner in self.corner_coords():
+        center = np.array(self.shape, float) / 2
+        for corner in self.iter_corner_coords():
             corner = np.fromiter((c - margin if c else margin for c in corner), float)
             for s in range(1, k + 1):
                 vec = (corner - center) * s / k
@@ -122,7 +117,7 @@ class Grid:
                   get_neighborhood(center, kind=kind, steps=steps, bounds=bounds)]
         return coords
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Tuple[Coord, Dict]]:
         """ iterate (coord, dict) pairs """
         return ((coord, self.coord2dict(coord)) for coord in self.iter_coords())
 
