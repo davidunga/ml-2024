@@ -4,7 +4,7 @@ import paths
 from optim_search_cv import OptimSearchCV
 from copy import deepcopy
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
-from config import get_default_config, inherit_from_config, FROM_CONFIG, get_config_name
+from config import get_base_config, inherit_from_config, FROM_CONFIG, get_config_name
 import pandas as pd
 from typing import Dict, List, Tuple
 import object_builder
@@ -110,7 +110,7 @@ def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
 
 
 def cv_search(fine_tune: bool):
-    base_config = get_default_config()
+    base_config = get_base_config()
     base_config['fine_tune'] = fine_tune
     for config in yield_from_grid(grid_dict=config_grid, default_dict=base_config):
         for balance_params in yield_from_grid(balance_params_grid[config['balance.method']]):
@@ -138,9 +138,11 @@ def cv_search_estimator_params(config: Dict):
     # build pipe that goes into the cross validation (=standardizing, balancing, one-hotting)
     cv_pipe = build_cv_pipe(config, Xy)  # Xy is used to initialize the onehot encoder
 
-    def _run_search(params: Dict, is_fine_tune: bool):
+    def _run_search(params: Dict, config_: Dict, **kwargs):
 
-        stage = 'fine' if is_fine_tune else 'base'
+        config = deepcopy(config_)
+        config.update(kwargs)
+        stage = 'fine' if config['fine_tune'] else 'base'
 
         # -----
         # split data
@@ -188,16 +190,17 @@ def cv_search_estimator_params(config: Dict):
         params = cv_searcher.best_params_
         params['n_estimators'] = get_best_iteration(cv_searcher.best_estimator_)
 
-        config_ = deepcopy(config)
-        config_['fine_tune'] = is_fine_tune
-        cv_result_manager.process_result(config_, cv_searcher, save=not DEV)
+        cv_result_manager.process_result(config, cv_searcher, save=not DEV)
 
         return params
 
-    params = {'random_state': seed, 'early_stopping_rounds': config['cv.base.early_stopping_rounds']}
-    params = _run_search(params, is_fine_tune=False)
+    params = {'random_state': seed,
+              'early_stopping_rounds': config['cv.early_stopping_rounds'],
+              'eval_metric': config['cv.early_stopping_eval_metric']}
+
+    params = _run_search(params, config, fine_tune=False)
     if config['fine_tune']:
-        _run_search(params, is_fine_tune=True)
+        _run_search(params, config, fine_tune=True)
 
 
 def _reduce_grid(grid: Dict) -> Dict:

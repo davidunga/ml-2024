@@ -30,10 +30,12 @@ def make_result_dict(config: Dict, cv: BaseSearchCV) -> Dict:
 
 def display(result_dict: Dict):
     df, score_names, main_score = make_report_df(result_dict['df'])
-    print(result_dict['name'], f"-- best by {main_score}:")
-    i = df[main_score].argmax()
-    print("  ", df.iloc[i]['text'])
-    print("  ", df.iloc[i]['params'])
+    print("Results for : " + result_dict['name'])
+    for score_name in score_names:
+        print(f" best by {score_name}:")
+        i = df[score_name].argmax()
+        print("   ", df.iloc[i]['text'])
+        print("   ", df.iloc[i]['params'])
 
 
 def save_result(result_dict: Dict):

@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 
 FROM_CONFIG = '_from_config_'
 
-_default_config = {
+_base_config = {
 
     'target_col': 'readmitted',
     'diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
@@ -28,7 +28,8 @@ _default_config = {
     'cv.main_score': 'roc_auc',
 
     'cv.early_stopping_eval_size': .2,
-    'cv.base.early_stopping_rounds': 5,
+    'cv.early_stopping_eval_metric': 'auc',
+    'cv.early_stopping_rounds': 5,
 
     'balance.method': 'RandomUnderSampler',
     'balance.params': {'random_state': FROM_CONFIG},
@@ -111,8 +112,8 @@ _default_config = {
 }
 
 
-def get_default_config() -> Dict:
-    return deepcopy(_default_config)
+def get_base_config() -> Dict:
+    return deepcopy(_base_config)
 
 
 def get_config_name(config: Dict) -> str:
