@@ -32,7 +32,7 @@ class DataTransformer(BaseEstimator, TransformerMixin):
     def name(self):
         name = self.__class__.__name__
         for attr in ['feature', 'method', 'new_feature']:
-            if hasattr(self, attr):
+            if hasattr(self, attr) and getattr(self, attr) is not None:
                 name += f"[{getattr(self, attr)}]"
         return name
 
@@ -410,12 +410,18 @@ class AddFeatureByNormalizing(DataTransformer):
 class AddFeatureBySumming(DataTransformer):
     """ Create feature by summing other features """
 
-    def __init__(self, features_to_sum: Dict[str, List[str]]):
+    def __init__(self, features_to_sum: Dict[str, List[str]], method: str = None):
         self.features_to_sum = features_to_sum
+        self.method = method
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         for new_feature, features in self.features_to_sum.items():
-            X[new_feature] = X[features].sum(axis=1)
+            if self.method is None:
+                X[new_feature] = X[features].sum(axis=1)
+            elif self.method == 'nnz':
+                X[new_feature] = (X[features] != 0).sum(axis=1)
+            else:
+                raise ValueError("Unknown method")
             self.prop_setter.register(num=[new_feature] + features)
         return X
 

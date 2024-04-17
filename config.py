@@ -43,7 +43,11 @@ _base_config = {
 
     'data.add_features.by_sum': {
         'num_visits': ['number_outpatient', 'number_inpatient', 'number_emergency'],
-        'num_nonEm_visits': ['number_outpatient', 'number_inpatient']
+        'num_nonEm_visits': ['number_outpatient', 'number_inpatient'],
+    },
+
+    'data.add_features.by_nnz_sum': {
+        'num_med_groups': ['biguanides_and_related', 'sulfonylureas_and_meglitinides', 'thiazolidinediones_and_miscellaneous']
     },
 
     'data.add_features.by_count': [

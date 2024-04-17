@@ -44,6 +44,8 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
     for kws in config['data.add_features.by_count']:
         add_step(AddFeatureByCounting(**kws))
 
+    add_step(AddFeatureBySumming(config['data.add_features.by_nnz_sum'], method='nnz'))
+
     if config['data.add_features.construct']['average_age']:
         add_step(AddFeatureAverageAge(age_group_col='age'))
     if config['data.add_features.construct']['encounter']:
