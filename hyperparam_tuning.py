@@ -140,6 +140,7 @@ def cv_search_estimator_params(config: Dict):
     DEV = False
     seed = config['random_state']
 
+    has_early_stopping = estimator_params_grids[config['estimator']]['_has_early_stopping']
     cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'], 'verbose': 0,
                'refit': config['cv.main_score'], 'return_train_score': True, 'n_jobs': -1}
 
@@ -203,14 +204,15 @@ def cv_search_estimator_params(config: Dict):
 
         cv_searcher.fit(*Xy_train, **fit_kws)
         params = cv_searcher.best_params_
-        params['n_estimators'] = get_best_iteration(cv_searcher.best_estimator_)
+        if params.get('early_stopping_rounds', None):
+            params['n_estimators'] = get_best_iteration(cv_searcher.best_estimator_)
 
         cv_result_manager.process_result(config, cv_searcher, save=not DEV)
 
         return params
 
     params = {'random_state': seed}
-    if estimator_params_grids[config['estimator']]['_has_early_stopping']:
+    if has_early_stopping:
         params.update({'early_stopping_rounds': config['cv.early_stopping_rounds'],
                        'eval_metric': config['cv.early_stopping_eval_metric']})
 
