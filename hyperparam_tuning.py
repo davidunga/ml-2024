@@ -7,7 +7,7 @@ from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_spli
 from config import get_base_config, inherit_from_config, FROM_CONFIG, get_config_name
 import pandas as pd
 from typing import Dict, List, Tuple
-import object_builder
+from object_builder import ObjectBuilder
 import numpy as np
 import cv_result_manager
 from itertools import product
@@ -45,8 +45,8 @@ balance_params_grid = {
         'n_neighbors': [3],
     },
     'InstanceHardnessThreshold': {
-        'estimator': [None, {'cls': 'sklearn.ensemble.RandomForestClassifier',
-                             'kws': {'n_estimators': 10, 'random_state': 1}}],
+        'estimator': [None, ('sklearn.ensemble.RandomForestClassifier',
+                             {'n_estimators': 10, 'random_state': 1})],
         'cv': [3, 5],
         'random_state': [FROM_CONFIG]
     }
@@ -89,6 +89,8 @@ estimator_params_grids = {
 }
 
 # -------
+
+object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost', model_selection, OptimSearchCV])
 
 
 def get_best_iteration(estimator):
@@ -161,19 +163,19 @@ def cv_search_estimator_params(config: Dict):
         # -----
         # initialize search:
 
-        estimator = object_builder.get_class(config['estimator'])(**params)
-        cv_searcher = object_builder.get_class(config[f'cv.{stage}.searcher'], [model_selection, OptimSearchCV])
+        estimator = object_builder.get_instance(config['estimator'], params)
+        cv_searcher_cls = object_builder.get_class(config[f'cv.{stage}.searcher'])
 
         if DEV:
             print("\n\n !! Running in DEV mode !! \n\n")
             #param_grid = _reduce_grid(param_grid)
-            if cv_searcher.__name__ == "OptimSearchCV":
+            if cv_searcher_cls.__name__ == "OptimSearchCV":
                 cv_args['visualize'] = True
 
         try:
-            cv_searcher = cv_searcher(estimator, random_state=seed, param_distributions=param_grid, **cv_args)
+            cv_searcher = cv_searcher_cls(estimator, random_state=seed, param_distributions=param_grid, **cv_args)
         except TypeError:
-            cv_searcher = cv_searcher(estimator, param_grid=param_grid, **cv_args)
+            cv_searcher = cv_searcher_cls(estimator, param_grid=param_grid, **cv_args)
 
         set_pipecv(cv_searcher, cv_pipe)
 

@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import object_builder
+from object_builder import ObjectBuilder
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
@@ -162,6 +162,7 @@ class Balancer(DataTransformer):
     def __init__(self, method: str, params: Dict):
         self.method = method
         self.params = params
+        self.object_builder = ObjectBuilder(self._sampler_modules)
         if self.method != 'none':
             self._get_new_sampler()  # verify we're good to go
 
@@ -169,10 +170,9 @@ class Balancer(DataTransformer):
 
         params = deepcopy(self.params)
         if self.params.get('estimator', None) is not None:
-            params['estimator'] = object_builder.get_instance(**self.params['estimator'])
+            params['estimator'] = self.object_builder.get_instance(*self.params['estimator'])
 
-        sampler_class = object_builder.get_class(self.method, self._sampler_modules)
-        sampler = sampler_class(**params)
+        sampler = self.object_builder.get_instance(self.method, params)
         for param in self._required_params:
             if hasattr(sampler, param) and param not in self.params:
                 raise ValueError(f"Missing required parameter: {param}")

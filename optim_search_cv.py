@@ -25,14 +25,14 @@ class OptimSearchCV(BaseSearchCV):
         2. Sample:
             - The direct (Von Neumann) neighborhood of best params
             - In the direction of gradient
-        3. If better better params are found- repeat from 2
-           If not: reduce step size and repeat from 2, or return
+        3. If better params are found- repeat from 2
+           If not: halve the step size and repeat from 2, or return (if step size = 1).
     """
 
     def __init__(self, estimator, param_grid: Dict, scales: int = 2, visualize: bool = False, **kwargs):
         """
         param_grid: parameters grid, currently only numeric values are supported
-        scales: number of x2 step size scalings, must be a power of two
+        scales: number of step size halvings. e.g. if scale=3, step sizes are 4 -> 2 -> 1
         """
         super().__init__(estimator, **kwargs)
 
@@ -52,6 +52,7 @@ class OptimSearchCV(BaseSearchCV):
 
     @property
     def visited(self) -> Dict[Coord, float]:
+        """ coordinate->loss dict """
         return self._visited
 
     @property
