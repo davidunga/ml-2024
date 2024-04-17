@@ -18,7 +18,7 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 # -------
 
 config_grid = {
-    'estimator': ['XGBClassifier', 'LGBMClassifier', 'CatBoostClassifier'],
+    'estimator': ['RandomForestClassifier', 'XGBClassifier', 'LGBMClassifier', 'CatBoostClassifier'],
     'cv.base.searcher': ['GridSearchCV'],
     'cv.fine.searcher': ['OptimSearchCV', 'RandomizedSearchCV'],
     'balance.method': ['none', 'SMOTENC', 'NearMiss', 'InstanceHardnessThreshold'],
@@ -62,7 +62,19 @@ _common_base_grid = {
 }
 
 estimator_params_grids = {
+    'RandomForestClassifier': {
+        '_has_early_stopping': False,
+        'base': {
+            'max_depth': np.arange(2, 10),
+            'n_estimators': [10, 20, 50],
+            'class_weight': [None, 'balanced', 'balanced_subsample']
+        },
+        'fine': {
+            'min_weight_fraction_leaf': [.0, .1, .2, .3]
+        }
+    },
     'XGBClassifier': {
+        '_has_early_stopping': True,
         'base': _common_base_grid,
         'fine': {
             'min_child_weight': np.arange(2, 10),
@@ -74,6 +86,7 @@ estimator_params_grids = {
         }
     },
     'LGBMClassifier': {
+        '_has_early_stopping': True,
         'base': _common_base_grid,
         'fine': {
             'min_child_weight': np.arange(2, 10),
@@ -81,6 +94,7 @@ estimator_params_grids = {
         }
     },
     'CatBoostClassifier': {
+        '_has_early_stopping': True,
         'base': _common_base_grid,
         'fine': {
             'bagging_temperature': [0, .25, .5, .75, 1, 2, 5],
@@ -90,7 +104,7 @@ estimator_params_grids = {
 
 # -------
 
-object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost', model_selection, OptimSearchCV])
+object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost', model_selection, OptimSearchCV, 'sklearn.ensemble'])
 
 
 def get_best_iteration(estimator):
@@ -153,12 +167,11 @@ def cv_search_estimator_params(config: Dict):
 
         Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], seed=seed)
 
-        if not params.get('early_stopping_rounds', None):
-            eval_set = []
-        else:
+        fit_kws = {}
+        if params.get('early_stopping_rounds', None):
             # make eval set for early stopping
             Xy_train, Xy_eval = stratified_split(Xy_train, test_size=config['cv.early_stopping_eval_size'], seed=seed)
-            eval_set = [cv_pipe.fit(Xy_train).transform(Xy_eval)]  # eval set isn't passed through cv-pipe
+            fit_kws['eval_set'] = [cv_pipe.fit(Xy_train).transform(Xy_eval)]  # eval set isn't passed through cv-pipe
 
         # -----
         # initialize search:
@@ -188,7 +201,7 @@ def cv_search_estimator_params(config: Dict):
         print(f"  Estimator params: {params}")
         print("\n\n")
 
-        cv_searcher.fit(*Xy_train, eval_set=eval_set)
+        cv_searcher.fit(*Xy_train, **fit_kws)
         params = cv_searcher.best_params_
         params['n_estimators'] = get_best_iteration(cv_searcher.best_estimator_)
 
@@ -196,9 +209,10 @@ def cv_search_estimator_params(config: Dict):
 
         return params
 
-    params = {'random_state': seed,
-              'early_stopping_rounds': config['cv.early_stopping_rounds'],
-              'eval_metric': config['cv.early_stopping_eval_metric']}
+    params = {'random_state': seed}
+    if estimator_params_grids[config['estimator']]['_has_early_stopping']:
+        params.update({'early_stopping_rounds': config['cv.early_stopping_rounds'],
+                       'eval_metric': config['cv.early_stopping_eval_metric']})
 
     params = _run_search(params, config, fine_tune=False)
     if config['fine_tune']:

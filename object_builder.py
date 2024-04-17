@@ -37,5 +37,5 @@ class ObjectBuilder:
             elif hasattr(module, cls):
                 classes_.append(getattr(module, cls))
         if len(classes_) != 1:
-            raise ValueError("Cannot find class" if not classes_ else "Class name is not unique")
+            raise ValueError(("Cannot find class: " if not classes_ else "Class name is not unique: ") + cls)
         return classes_[0]

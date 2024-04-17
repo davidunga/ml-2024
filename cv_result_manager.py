@@ -14,7 +14,7 @@ from glob import glob
 def process_result(config: Dict, cv: BaseSearchCV, save: bool = True):
     results = make_result_dict(config, cv)
     display(results)
-    if not save:
+    if save:
         save_result(results)
         refresh_bests_file()
 
