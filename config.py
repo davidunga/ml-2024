@@ -36,8 +36,8 @@ _base_config = {
 
     'data.standardize': {
         'default_transform': 'sqrt',
-        'feature_transforms': {},
-        'outlier_p': 0,
+        'feature_transforms': {'num_lab_procedures': 'none', 'age_avg': 'none'},
+        'outlier_p': .99,
         'offset': .5
     },
 

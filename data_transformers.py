@@ -104,46 +104,35 @@ class Standardizer(DataTransformer):
     TRANSFORMS = {'none': lambda x: x.astype(float), 'sqrt': np.sqrt}
 
     def __init__(self, default_transform: str, feature_transforms: Dict[str, str],
-                 outlier_p: float = .01, offset: float = 0):
-        self.outlier_p = outlier_p
+                 outlier_p: float = .99, offset: float = 0):
         self.offset = offset
+        self.outlier_p = outlier_p
         self.default_transform = default_transform
         self.feature_transforms = feature_transforms
         self.standardize_params = {}
 
     def _fit(self, Xy, y=None, **kwargs):
         X, y = unpack_args(Xy, y)
-
-        def _get_clip_lims(x):
-            if not self.outlier_p:
-                return None
-            else:
-                return np.percentile(x, [100 * self.outlier_p, 100 * (1 - self.outlier_p)])
-
+        clip_lims = None
         for feature in X.select_dtypes('number').columns:
             tform = self.feature_transforms.get(feature, self.default_transform)
-            func = self.TRANSFORMS[tform]
             x = X[feature].to_numpy(dtype=float)
-            x = func(x)
-            center = np.mean(x)
-            scale = np.std(x)
-            x = self._apply_transform(x, tform, center, scale)
-            self.standardize_params[feature] = (tform, center, scale, _get_clip_lims(x))
+            if self.outlier_p is not None:
+                clip_lims = (None, np.nanquantile(x, self.outlier_p))
+                assert np.mean(x == np.clip(x, *clip_lims)) > .9
+                x = np.clip(x, *clip_lims)
+            x = self.TRANSFORMS[tform](x)
+            self.standardize_params[feature] = (tform, np.nanmean(x), np.nanstd(x), clip_lims)
         return self
-
-    def _apply_transform(self, x, tform, center, scale, clip_lims=None):
-        func = self.TRANSFORMS[tform]
-        x = func(x)
-        x = (x - center) / scale
-        x += self.offset
-        if clip_lims is not None:
-            x = np.clip(x, *clip_lims)
-        return x
 
     def transform(self, Xy, y=None) -> Tuple[pd.DataFrame, pd.DataFrame]:
         X = Xy[0].copy()
         for feature, (tform, center, scale, clip_lims) in self.standardize_params.items():
-            X[feature] = self._apply_transform(X[feature].to_numpy(), tform, center, scale, clip_lims)
+            x = X[feature].to_numpy()
+            if clip_lims is not None:
+                x = np.clip(x, *clip_lims)
+            x = self.TRANSFORMS[tform](x)
+            X[feature] = (x - center) / scale + self.offset
         return X, Xy[1]
 
 
