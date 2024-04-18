@@ -139,3 +139,10 @@ def inherit_from_config(d: Dict, config: Dict) -> Dict:
         return v
     return {k: config[k] if type(v) == type(FROM_CONFIG) and v == FROM_CONFIG else _get(v)
             for k, v in d.items()}
+
+
+def get_modified_config(config, **kwargs):
+    assert set(kwargs).issubset(config)
+    mod = deepcopy(config)
+    mod.update(kwargs)
+    return mod

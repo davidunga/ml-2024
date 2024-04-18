@@ -121,4 +121,7 @@ def refresh_bests_file():
         f.writelines("\n".join(lines))
 
 
+def get_result_files_for_config(config) -> List[str]:
+    return glob(str(paths.CV_RESULTS_PATH / (get_config_name(config) + '.*')))
+
 #refresh_bests_file()

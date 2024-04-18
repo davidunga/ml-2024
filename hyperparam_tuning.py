@@ -1,19 +1,21 @@
 from sklearn.experimental import enable_halving_search_cv  # required
 from sklearn import model_selection
-import paths
 from optim_search_cv import OptimSearchCV
 from copy import deepcopy
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
-from config import get_base_config, inherit_from_config, FROM_CONFIG, get_config_name
-import pandas as pd
+from config import get_base_config, inherit_from_config, FROM_CONFIG, get_config_name, get_modified_config
 from typing import Dict, List, Tuple
 from object_builder import ObjectBuilder
+from estimator_params_manager import EstimatorParamsManager
 import numpy as np
 import cv_result_manager
 from itertools import product
 from pipe_cross_val import set_pipecv
 import os
 os.environ['PYTHONWARNINGS'] = 'ignore'
+
+object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost',
+                                model_selection, OptimSearchCV, 'sklearn.ensemble'])
 
 # -------
 
@@ -63,7 +65,6 @@ _common_base_grid = {
 
 estimator_params_grids = {
     'RandomForestClassifier': {
-        '_has_early_stopping': False,
         'base': {
             'max_depth': np.arange(2, 10),
             'n_estimators': [10, 20, 50],
@@ -74,7 +75,6 @@ estimator_params_grids = {
         }
     },
     'XGBClassifier': {
-        '_has_early_stopping': True,
         'base': _common_base_grid,
         'fine': {
             'min_child_weight': np.arange(2, 10),
@@ -86,7 +86,6 @@ estimator_params_grids = {
         }
     },
     'LGBMClassifier': {
-        '_has_early_stopping': True,
         'base': _common_base_grid,
         'fine': {
             'min_child_weight': np.arange(2, 10),
@@ -94,7 +93,6 @@ estimator_params_grids = {
         }
     },
     'CatBoostClassifier': {
-        '_has_early_stopping': True,
         'base': _common_base_grid,
         'fine': {
             'bagging_temperature': [0, .25, .5, .75, 1, 2, 5],
@@ -102,16 +100,8 @@ estimator_params_grids = {
     }
 }
 
+
 # -------
-
-object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost', model_selection, OptimSearchCV, 'sklearn.ensemble'])
-
-
-def get_best_iteration(estimator):
-    for attr in ['best_iteration', 'best_iteration_', '_best_iteration']:
-        if hasattr(estimator, attr):
-            return getattr(estimator, attr)
-    assert AttributeError("Estimator doesnt have best iteration attribute")
 
 
 def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
@@ -125,22 +115,32 @@ def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
         yield result
 
 
-def cv_search(fine_tune: bool):
+def cv_search(fine_tune: bool, skip_existing: bool = True):
     base_config = get_base_config()
     base_config['fine_tune'] = fine_tune
     for config in yield_from_grid(grid_dict=config_grid, default_dict=base_config):
         for balance_params in yield_from_grid(balance_params_grid[config['balance.method']]):
             config['balance.params'] = inherit_from_config(balance_params, config)
-            cv_search_estimator_params(config)
+            cv_search_estimator_params(config, skip_existing)
 
 
-def cv_search_estimator_params(config: Dict):
+def cv_search_estimator_params(config: Dict, skip_existing):
     """ cv-search estimator params for a given configuration """
+
+    config = deepcopy(config)
+    fine_tune_config = config if config['fine_tune'] else None
+    config = get_modified_config(config, fine_tune=False)  # first iteration is always none-finetune
+
+    if skip_existing and cv_result_manager.get_result_files_for_config(config):
+        if fine_tune_config is None or cv_result_manager.get_result_files_for_config(fine_tune_config):
+            print(f"{get_config_name(config)}: Skipping (exists)")
+            return
+
+    print(f"\n--------- {get_config_name(fine_tune_config if fine_tune_config else config)}:\n")
 
     DEV = False
     seed = config['random_state']
-
-    has_early_stopping = estimator_params_grids[config['estimator']]['_has_early_stopping']
+    params_manager = EstimatorParamsManager(config['estimator'])
     cv_args = {'cv': config['cv.n_folds'], 'scoring': config['cv.scores'], 'verbose': 0,
                'refit': config['cv.main_score'], 'return_train_score': True, 'n_jobs': -1}
 
@@ -155,21 +155,22 @@ def cv_search_estimator_params(config: Dict):
     # build pipe that goes into the cross validation (=standardizing, balancing, one-hotting)
     cv_pipe = build_cv_pipe(config, Xy)  # Xy is used to initialize the onehot encoder
 
-    def _run_search(params: Dict, config_: Dict, **kwargs):
+    def _run_search(params: Dict, config: Dict):
 
-        config = deepcopy(config_)
-        config.update(kwargs)
         stage = 'fine' if config['fine_tune'] else 'base'
+        estimator_name = config['estimator']
+        cv_searcher_name = config[f'cv.{stage}.searcher']
 
         # -----
         # split data
 
-        param_grid = estimator_params_grids[config['estimator']][stage]
+        param_grid = estimator_params_grids[estimator_name][stage]
 
         Xy_train, Xy_test = stratified_split(Xy, test_size=config['data.test_size'], seed=seed)
 
         fit_kws = {}
         if params.get('early_stopping_rounds', None):
+            assert stage == 'base'
             # make eval set for early stopping
             Xy_train, Xy_eval = stratified_split(Xy_train, test_size=config['cv.early_stopping_eval_size'], seed=seed)
             fit_kws['eval_set'] = [cv_pipe.fit(Xy_train).transform(Xy_eval)]  # eval set isn't passed through cv-pipe
@@ -177,8 +178,8 @@ def cv_search_estimator_params(config: Dict):
         # -----
         # initialize search:
 
-        estimator = object_builder.get_instance(config['estimator'], params)
-        cv_searcher_cls = object_builder.get_class(config[f'cv.{stage}.searcher'])
+        estimator = object_builder.get_instance(estimator_name, params)
+        cv_searcher_cls = object_builder.get_class(cv_searcher_name)
 
         if DEV:
             print("\n\n !! Running in DEV mode !! \n\n")
@@ -205,20 +206,19 @@ def cv_search_estimator_params(config: Dict):
         cv_searcher.fit(*Xy_train, **fit_kws)
         params = cv_searcher.best_params_
         if params.get('early_stopping_rounds', None):
-            params['n_estimators'] = get_best_iteration(cv_searcher.best_estimator_)
+            params['n_estimators'] = params_manager.get_best_iteration(cv_searcher.best_estimator_)
 
         cv_result_manager.process_result(config, cv_searcher, save=not DEV)
 
         return params
 
-    params = {'random_state': seed}
-    if has_early_stopping:
-        params.update({'early_stopping_rounds': config['cv.early_stopping_rounds'],
-                       'eval_metric': config['cv.early_stopping_eval_metric']})
+    params = params_manager.adjust_to_estimator(
+        {'random_state': seed, 'early_stopping_rounds': config['cv.early_stopping_rounds'],
+         'eval_metric': config['cv.early_stopping_eval_metric']})
 
-    params = _run_search(params, config, fine_tune=False)
-    if config['fine_tune']:
-        _run_search(params, config, fine_tune=True)
+    params = _run_search(params, config)
+    if fine_tune_config:
+        _run_search(params, fine_tune_config)
 
 
 def _reduce_grid(grid: Dict) -> Dict:
