@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+
+import paths
+from config import get_section, get_hash, get_base_config
 from typing import List, Tuple, Dict
 from sklearn.model_selection import train_test_split
 from paths import DATA_PATH
@@ -14,9 +17,12 @@ from data_transformers import (
 
 def build_data_prep_pipe(config: Dict) -> Pipeline:
 
+    # make sure pipe is full defined by data section of config:
+    data_config = get_section(config, 'data')
+
     prop_setter = PropertySetter(default='cat').register(
-        num=config['numeric_cols'],
-        drop=config['data.exclude_features.by_name'])
+        num=data_config['numeric_cols'],
+        drop=data_config['exclude_features.by_name'])
 
     steps = []
 
@@ -27,46 +33,46 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
     # ----
     # Remove ROWS:
 
-    if config['data.exclude_rows.pregnancy_diabetes']:
-        add_step(RowRemoverByFeatureValue(feature=config['diagnosis_cols'],
+    if data_config['exclude_rows.pregnancy_diabetes']:
+        add_step(RowRemoverByFeatureValue(feature=data_config['diagnosis_cols'],
                                           exclude_vals=[ICDConverter.PREGNANCY_DIABETES_ICD]))
 
-    for col, exclude_vals in config['data.exclude_rows.where'].items():
+    for col, exclude_vals in data_config['exclude_rows.where'].items():
         add_step(RowRemoverByFeatureValue(feature=col, exclude_vals=exclude_vals))
 
-    add_step(RowRemoverByDuplicates(config['data.exclude_rows.duplicate']))
+    add_step(RowRemoverByDuplicates(data_config['exclude_rows.duplicate']))
 
     # ----
     # Add FEATURES:
 
-    add_step(AddFeatureByNormalizing(config['data.add_features.by_normalize']))
-    add_step(AddFeatureBySumming(config['data.add_features.by_sum']))
-    for kws in config['data.add_features.by_count']:
+    add_step(AddFeatureByNormalizing(data_config['add_features.by_normalize']))
+    add_step(AddFeatureBySumming(data_config['add_features.by_sum']))
+    for kws in data_config['add_features.by_count']:
         add_step(AddFeatureByCounting(**kws))
 
-    add_step(AddFeatureBySumming(config['data.add_features.by_nnz_sum'], method='nnz'))
+    add_step(AddFeatureBySumming(data_config['add_features.by_nnz_sum'], method='nnz'))
 
-    if config['data.add_features.construct']['average_age']:
+    if data_config['add_features.construct']['average_age']:
         add_step(AddFeatureAverageAge(age_group_col='age'))
-    if config['data.add_features.construct']['encounter']:
+    if data_config['add_features.construct']['encounter']:
         add_step(AddFeatureEncounter())
 
     # ----
     # Regroup CATEGORIES:
 
-    for col, lookup in config['data.categories.reduce'].items():
+    for col, lookup in data_config['categories.reduce'].items():
         add_step(CategoryReducer(feature=col, lookup=lookup))
 
-    add_step(CategoryGroupOthers(config['data.categories.group_others']))
+    add_step(CategoryGroupOthers(data_config['categories.group_others']))
 
-    add_step(ICDConverter(features=config['diagnosis_cols']))
+    add_step(ICDConverter(features=data_config['diagnosis_cols']))
 
     # ----
     # Finalize:
 
     steps.append(prop_setter)
-    steps.append(TargetSeparator(target_col=config['target_col'],
-                                 sanity_mode=config['data.sanity_mode']))
+    steps.append(TargetSeparator(target_col=data_config['target_col'],
+                                 sanity_mode=data_config['sanity_mode']))
 
     pipe = Pipeline(steps=[(step.name, step) for step in steps])
     print("Data prep pipe:")
@@ -95,6 +101,29 @@ def build_cv_pipe(config: Dict, full_Xy) -> Pipeline:
     return pipe
 
 
+def make_prepped_csv(config: Dict):
+
+    folder = paths.DATA_PATH / "prepped"
+    folder.mkdir(parents=True, exist_ok=True)
+    print("Making prepped data csvs")
+
+    csv_name = f"prepped_data {get_hash(get_section(config, 'data'))[:6]}"
+
+    raw_data = load_data(config)
+    prep_pipe = build_data_prep_pipe(config)
+    Xy = prep_pipe.fit_transform(raw_data)
+
+    df = pd.concat(Xy, axis=1)
+    df.to_csv(folder / (csv_name + " NonStandardized.csv"))
+
+    standardizer = Standardizer(**config['data.standardize'])
+    Xy = standardizer.fit_transform(Xy)
+
+    df = pd.concat(Xy, axis=1)
+    df.to_csv(folder / (csv_name + " Standardized.csv"))
+    print("Done. Saved to: " + str(folder))
+
+
 def describe_pipe(pipe: Pipeline):
     max_row_len = 80
     lines = [""]
@@ -115,3 +144,7 @@ def stratified_split(Xy, test_size, seed: int):
     X_train, X_test, y_train, y_test = train_test_split(
         *Xy, test_size=test_size, shuffle=True, random_state=seed, stratify=Xy[1])
     return (X_train, y_train), (X_test, y_test)
+
+
+if __name__ == "__main__":
+    make_prepped_csv(get_base_config())
