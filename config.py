@@ -8,18 +8,17 @@ FROM_CONFIG = '_from_config_'
 
 _base_config = {
 
-    'target_col': 'readmitted',
-    'diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
-    'numeric_cols': ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
-                     'num_medications', 'number_outpatient', 'number_emergency',
-                     'number_inpatient', 'number_diagnoses', 'weight'],
+    'data.sanity_mode': 'none',
+    'data.target_col': 'readmitted',
+    'data.diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],
+    'data.numeric_cols': ['time_in_hospital', 'num_lab_procedures', 'num_procedures',
+                          'num_medications', 'number_outpatient', 'number_emergency',
+                          'number_inpatient', 'number_diagnoses', 'weight'],
+    'data.test_size': .2,
 
     'random_state': 1337,
     'fine_tune': True,
     'estimator': 'XGBClassifier',
-
-    'data.sanity_mode': 'none',
-    'data.test_size': .2,
 
     'cv.base.searcher': 'GridSearchCV',
     'cv.fine.searcher': 'RandomizedSearchCV',
@@ -33,7 +32,6 @@ _base_config = {
 
     'balance.method': 'RandomUnderSampler',
     'balance.params': {'random_state': FROM_CONFIG},
-
     'data.standardize': {
         'default_transform': 'sqrt',
         'feature_transforms': {'num_lab_procedures': 'none', 'age_avg': 'none'},
@@ -121,9 +119,10 @@ def get_base_config() -> Dict:
 
 
 def get_config_name(config: Dict) -> str:
-    hash_ = md5(json.dumps(config).encode()).hexdigest()[:4]
+    hash_ = get_hash(config)[:4]
     estimator = config['estimator'].replace('Classifier', '').replace('Boost', 'B')
-    cv_searcher = config['cv.fine.searcher'] if config['fine_tune'] else config['cv.base.searcher']
+    cv_searcher = config['cv.fine.searcher'] if config[
+        'fine_tune'] else config['cv.base.searcher']
     balance = 'NoBalance' if config['balance.method'] == 'none' else config['balance.method']
     stage = "TUNED" if config['fine_tune'] else "BASE"
     by = config['cv.main_score'].split('_')[-1]
@@ -146,3 +145,18 @@ def get_modified_config(config, **kwargs):
     mod = deepcopy(config)
     mod.update(kwargs)
     return mod
+
+
+def get_hash(config: Dict) -> str:
+    config_ = dict(sorted(config.items()))
+    return md5(json.dumps(config_).encode()).hexdigest()
+
+
+def get_section(config: Dict, section: str) -> Dict:
+    section += '.'
+    sz = len(section)
+    ret = {k[sz:]: v for k, v in deepcopy(config).items() if k.startswith(section)}
+    if not ret:
+        raise ValueError(f"Config does not contain section {section}")
+    return ret
+
