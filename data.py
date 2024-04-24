@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-
 import paths
 from config import get_section, get_hash, get_base_config
 from typing import List, Tuple, Dict
@@ -16,8 +15,9 @@ from data_transformers import (
 
 
 def build_data_prep_pipe(config: Dict) -> Pipeline:
+    """ Builds data preparation pipe, to be applied to the full dataset. """
 
-    # make sure pipe is full defined by data section of config:
+    # make sure pipe is fully defined by data section of config:
     data_config = get_section(config, 'data')
 
     prop_setter = PropertySetter(default='cat').register(
@@ -82,6 +82,7 @@ def build_data_prep_pipe(config: Dict) -> Pipeline:
 
 
 def build_cv_pipe(config: Dict, full_Xy) -> Pipeline:
+    """ Builds pipe that goes into the cross-validator, after prep pipe was applied  """
 
     onehot_converter = OneHotConverter().fit(*full_Xy)  # fit over full dataset
     onehot_converter.frozen = True  # prevent re-fitting during train
@@ -102,6 +103,11 @@ def build_cv_pipe(config: Dict, full_Xy) -> Pipeline:
 
 
 def make_prepped_csv(config: Dict):
+    """
+    Creates two csv files:
+        ... NonStandardized.csv = Data after passing through prep pipe.
+        ... Standardized.csv = Data after passing through prep pipe & standardizer.
+    """
 
     folder = paths.DATA_PATH / "prepped"
     folder.mkdir(parents=True, exist_ok=True)
@@ -125,6 +131,7 @@ def make_prepped_csv(config: Dict):
 
 
 def describe_pipe(pipe: Pipeline):
+    """ print pipeline steps """
     max_row_len = 80
     lines = [""]
     for i, step in enumerate(pipe):

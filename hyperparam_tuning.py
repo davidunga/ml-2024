@@ -17,7 +17,8 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost',
                                 model_selection, OptimSearchCV, 'sklearn.ensemble'])
 
-# -------
+# ---------------------------------------
+# Grids:
 
 config_grid = {
     'estimator': ['RandomForestClassifier', 'XGBClassifier', 'LGBMClassifier', 'CatBoostClassifier'],
@@ -101,21 +102,13 @@ estimator_params_grids = {
 }
 
 
-# -------
-
-
-def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
-    default_dict = deepcopy(default_dict) if default_dict else {}
-    keys = grid_dict.keys()
-    if default_dict:
-        assert set(keys).issubset(default_dict.keys())
-    for vals in product(*grid_dict.values()):
-        result = default_dict
-        result.update(dict(zip(keys, vals)))
-        yield result
-
+# ---------------------------------------
+# Search funcs:
 
 def cv_search(fine_tune: bool, skip_existing: bool = True):
+    """ Entry point for cv search. Iterates over the configurations defined by the grids,
+        and cv-searches best estimator params for each configuration.
+    """
     base_config = get_base_config()
     base_config['fine_tune'] = fine_tune
     for config in yield_from_grid(grid_dict=config_grid, default_dict=base_config):
@@ -124,7 +117,7 @@ def cv_search(fine_tune: bool, skip_existing: bool = True):
             cv_search_estimator_params(config, skip_existing)
 
 
-def cv_search_estimator_params(config: Dict, skip_existing):
+def cv_search_estimator_params(config: Dict, skip_existing: bool):
     """ cv-search estimator params for a given configuration """
 
     config = deepcopy(config)
@@ -221,9 +214,25 @@ def cv_search_estimator_params(config: Dict, skip_existing):
         _run_search(params, fine_tune_config)
 
 
+# ---------------------------------------
+# Helper funcs:
+
+def yield_from_grid(grid_dict: Dict, default_dict: Dict = None):
+    default_dict = deepcopy(default_dict) if default_dict else {}
+    keys = grid_dict.keys()
+    if default_dict:
+        assert set(keys).issubset(default_dict.keys())
+    for vals in product(*grid_dict.values()):
+        result = default_dict
+        result.update(dict(zip(keys, vals)))
+        yield result
+
+
 def _reduce_grid(grid: Dict) -> Dict:
     return {k: [v[0], v[-1]] if len(v) > 1 else v for k, v in grid.items()}
 
+
+# ---------------------------------------
 
 if __name__ == "__main__":
     cv_search(fine_tune=True)
