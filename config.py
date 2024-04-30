@@ -34,7 +34,7 @@ _base_config = {
     'balance.params': {'random_state': FROM_CONFIG},
     'data.standardize': {
         'default_transform': 'sqrt',
-        'feature_transforms': {'num_lab_procedures': 'none', 'age_avg': 'none'},
+        'feature_transforms': {'age_avg': 'none'},
         'outlier_p': .99,
         'offset': .5
     },
@@ -45,7 +45,8 @@ _base_config = {
     },
 
     'data.add_features.by_nnz_sum': {
-        'num_med_groups': ['biguanides_and_related', 'sulfonylureas_and_meglitinides', 'thiazolidinediones_and_miscellaneous']
+        'num_med_groups': ['biguanides_and_related', 'sulfonylureas_and_meglitinides',
+                           'thiazolidinediones_and_miscellaneous']
     },
 
     'data.add_features.by_count': [
