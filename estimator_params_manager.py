@@ -18,8 +18,10 @@ class EstimatorParamsManager:
         return self.estimator_name in _have_early_stopping
 
     def adjust_to_estimator(self, params: Dict) -> Dict:
-        if not self.supports_early_stopping():
+        if not self.supports_early_stopping() or params.get('early_stopping_rounds', None) == -1:
             params = _drop_early_stopping_params(params)
+        if 'early_stopping_rounds' in params and 'n_estimators' in params:
+            del params['n_estimators']
         if self.estimator_name == 'CatBoostClassifier':
             params = _convert_to_catboost_format(params)
         return params

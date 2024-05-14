@@ -57,53 +57,62 @@ balance_params_grid = {
 
 # -------
 # params grid for each estimator
-# included estimator are defined in config_grid
 
 _common_base_grid = {
-    'max_depth': np.arange(2, 10),
+    'max_depth': np.arange(2, 15),
     'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
+    'n_estimators': [50, 100, 200, 500]
 }
 
 estimator_params_grids = {
     'RandomForestClassifier': {
         'base': {
-            'max_depth': np.arange(2, 10),
-            'n_estimators': [10, 20, 50],
+            'max_depth': np.arange(2, 20),
+            'n_estimators': [10, 20, 50, 100, 200],
             'class_weight': [None, 'balanced', 'balanced_subsample']
         },
         'fine': {
-            'min_weight_fraction_leaf': [.0, .1, .2, .3]
+            'min_weight_fraction_leaf': [0.0, 0.01, 0.05, 0.1, 0.2, 0.3],
+            'min_samples_split': np.arange(2, 10),
+            'min_samples_leaf': np.arange(1, 5)
         }
     },
     'XGBClassifier': {
         'base': _common_base_grid,
         'fine': {
-            'min_child_weight': np.arange(2, 10),
-            'gamma': np.linspace(0, .5, 16),
-            'subsample':  np.linspace(.4, 1., 16),
-            'colsample_bytree': np.linspace(.6, 1., 16),
+            'min_child_weight': np.arange(1, 10),
+            'gamma': np.linspace(0, 1, 20),
+            'subsample': np.linspace(0.4, 1.0, 20),
+            'colsample_bytree': np.linspace(0.5, 1.0, 20),
             'reg_alpha': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
             'reg_lambda': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
+            'scale_pos_weight': [0.5, 1.0, 2.0, 5.0, 10.0]
         }
     },
     'LGBMClassifier': {
         'base': _common_base_grid,
         'fine': {
-            'min_child_weight': np.arange(2, 10),
-            'subsample':  np.linspace(.4, 1., 16),
+            'min_child_weight': np.arange(1, 10),
+            'subsample': np.linspace(0.4, 1.0, 20),
+            'colsample_bytree': np.linspace(0.5, 1.0, 20),
+            'num_leaves': np.arange(20, 150, 10),
+            'reg_alpha': [0, 0.1, 1, 10],
+            'reg_lambda': [0, 0.1, 1, 10]
         }
     },
     'CatBoostClassifier': {
         'base': _common_base_grid,
         'fine': {
-            'bagging_temperature': [0, .25, .5, .75, 1, 2, 5],
+            'bagging_temperature': [0, 0.25, 0.5, 0.75, 1, 2, 5, 10],
+            'depth': np.arange(4, 12),
+            'l2_leaf_reg': [1, 3, 5, 7, 9]
         }
     }
 }
 
-
 # ---------------------------------------
 # Search funcs:
+
 
 def cv_search(fine_tune: bool, skip_existing: bool = True):
     """ Entry point for cv search. Iterates over the configurations defined by the grids,

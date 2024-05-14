@@ -28,7 +28,7 @@ _base_config = {
 
     'cv.early_stopping_eval_size': .2,
     'cv.early_stopping_eval_metric': 'auc',
-    'cv.early_stopping_rounds': 5,
+    'cv.early_stopping_rounds': -1,
 
     'balance.method': 'RandomUnderSampler',
     'balance.params': {'random_state': FROM_CONFIG},
