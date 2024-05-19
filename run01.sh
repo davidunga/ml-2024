@@ -8,7 +8,7 @@
 #BSUB -n 8
 #BSUB -W 24:00
 
-
+module load Python/3.10.4-GCCcore-11.3.0
 source ml-2024/bin/activate
 cd ~/ml-2024
 export PYTHONPATH='.'

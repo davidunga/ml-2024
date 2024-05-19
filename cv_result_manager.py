@@ -9,6 +9,9 @@ from sklearn.model_selection._search import BaseSearchCV
 import pickle
 from copy import deepcopy
 from glob import glob
+from object_builder import ObjectBuilder
+
+estimator_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost', 'sklearn.ensemble'])
 
 
 def process_result(config: Dict, cv: BaseSearchCV, save: bool = True):
@@ -53,7 +56,9 @@ def load_results(csvs: str | List[str] = None) -> pd.DataFrame:
 
     if not csvs:
         csvs = glob(str(paths.CV_RESULTS_PATH / "*.csv"))
-    elif isinstance(csvs, str):
+    if isinstance(csvs, str) and not Path(csvs).exists():
+        csvs = glob(str(paths.CV_RESULTS_PATH / f"{csvs}.csv"))
+    if isinstance(csvs, str):
         csvs = [csvs]
 
     def _safe_load(csv):
@@ -69,6 +74,24 @@ def load_results(csvs: str | List[str] = None) -> pd.DataFrame:
     df.reset_index(inplace=True)
 
     return df
+
+
+def load_best(csvs: str | List[str] = None):
+    df = load_results(csvs)
+
+    score_names = [col.replace('mean_test_', '') for col in df.columns if col.startswith('mean_test_')]
+    df.rename(columns={f'mean_test_{s}': s for s in score_names}, inplace=True)
+
+    bests = {}
+    for score_name in score_names:
+        row = df.iloc[df[score_name].argmax()]
+        config = json.loads(row['config'])
+        params = json.loads(row['params'].replace("\'", "\"").replace('None', 'null'))
+        estimator = estimator_builder.get_instance(config['estimator'], params)
+        scores = row[score_names]
+        bests[score_name] = (estimator, config, scores)
+
+    return bests
 
 
 def make_report_df(df: pd.DataFrame):
