@@ -12,16 +12,18 @@ import cv_result_manager
 from itertools import product
 from pipe_cross_val import set_pipecv
 import os
+
 os.environ['PYTHONWARNINGS'] = 'ignore'
 
-object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost',
-                                model_selection, OptimSearchCV, 'sklearn.ensemble'])
+object_builder = ObjectBuilder(['lightgbm', 'xgboost', 'catboost', model_selection, OptimSearchCV,
+                                'sklearn.ensemble', 'sklearn.linear_model', 'sklearn.svm'])
 
 # ---------------------------------------
 # Grids:
 
 config_grid = {
-    'estimator': ['RandomForestClassifier', 'XGBClassifier', 'LGBMClassifier', 'CatBoostClassifier'],
+    'estimator': ['LogisticRegression', 'LinearSVM', 'RandomForestClassifier',
+                  'XGBClassifier', 'LGBMClassifier', 'CatBoostClassifier'],
     'cv.base.searcher': ['GridSearchCV'],
     'cv.fine.searcher': ['OptimSearchCV', 'RandomizedSearchCV'],
     'balance.method': ['none', 'SMOTENC', 'NearMiss', 'InstanceHardnessThreshold'],
@@ -37,6 +39,8 @@ balance_params_grid = {
     },
     'RandomUnderSampler': {
         'random_state': [FROM_CONFIG],
+    },
+    'SDV': {
     },
     'SMOTENC': {
         'random_state': [FROM_CONFIG],
@@ -65,6 +69,26 @@ _common_base_grid = {
 }
 
 estimator_params_grids = {
+    'LogisticRegression': {
+        'base': {
+            'C': [.05, .5, 1., 5.],
+            'penalty': [None, 'l2'],
+            'class_weight': ['balanced', None]
+        },
+        'fine': {
+            'C': [.05, .1, .5, 1., 5., 10.],
+        }
+    },
+    'LinearSVM': {
+        'base': {
+            'C': [.05, .5, 1., 5.],
+            'penalty': ['l1', 'l2'],
+            'class_weight': ['balanced', None]
+        },
+        'fine': {
+            'C': [.05, .1, .5, 1., 5., 10.],
+        }
+    },
     'RandomForestClassifier': {
         'base': {
             'max_depth': np.arange(2, 20),
