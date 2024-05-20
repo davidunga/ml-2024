@@ -10,7 +10,8 @@ import imblearn as imbl
 from copy import deepcopy
 from typing import List, Dict, Tuple, Sequence, Set
 from collections import defaultdict
-from itertools import product
+from sdv.metadata import SingleTableMetadata
+from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer
 
 
 class DataTransformer(BaseEstimator, TransformerMixin):
@@ -143,19 +144,17 @@ class Balancer(DataTransformer):
     """
 
     _required_params = ['random_state']  # require even if sampler has a default value
-    _dataframe_input = ['SMOTENC']  # samplers that allow or require dataframe input
+    _dataframe_input = ['SMOTENC', 'SDV']  # samplers that allow or require dataframe input
     _sampler_modules = [imbl.under_sampling, imbl.over_sampling, imbl.combine]
-
-    # @TODO add SDV
 
     def __init__(self, method: str, params: Dict):
         self.method = method
         self.params = params
         self.object_builder = ObjectBuilder(self._sampler_modules)
-        if self.method != 'none':
+        if self.method not in ('none', 'SDV'):
             self._get_new_sampler()  # verify we're good to go
 
-    def _get_new_sampler(self):
+    def _get_new_sampler(self, Xy=None):
 
         params = deepcopy(self.params)
         if self.params.get('estimator', None) is not None:
@@ -173,11 +172,34 @@ class Balancer(DataTransformer):
         return self.method in self._dataframe_input
 
     def fit_transform(self, Xy, y=None, **kwargs):
-        # called on training set -- resample and forget
+        if self.method == 'SDV':
+            X, y = Xy
+            orig_categories = {}
+            for col in X.columns:
+                if X[col].dtype == 'category':
+                    orig_categories[col] = X[col].cat.categories
+                    X[col] = X[col].astype(str)
+            metadata = SingleTableMetadata()
+            metadata.detect_from_dataframe(X)
+            sampler = CTGANSynthesizer(metadata=metadata)
+            ylabel = y == 'YES'
+            positive_rows = np.nonzero(ylabel)[0]
+            sampler.fit(X.iloc[positive_rows])
+            imbalance_size = len(y) - 2 * len(positive_rows)
+            synthetic_positives = sampler.sample(num_rows=imbalance_size)
+            X = pd.concat([X, synthetic_positives], axis=0).reset_index()
+            for col, orig_cat in orig_categories.items():
+                X[col] = pd.Categorical(X[col], categories=orig_cat)
+            ii = np.random.default_rng(1).permutation(len(X))
+            X = X.iloc[ii]
+            ylabel = np.r_[ylabel, np.ones(len(synthetic_positives), bool)]
+            y = pd.Series(['YES' if ylabel[i] else 'NO' for i in ii]).astype('category')
+            return X, y
+
         if self.method == 'none':
             return unpack_args(Xy, y)
         else:
-            return self._get_new_sampler().fit_resample(*unpack_args(Xy, y), **kwargs)
+            return self._get_new_sampler(Xy).fit_resample(*unpack_args(Xy, y), **kwargs)
 
     def transform(self, Xy, **kwargs):
         # called on validation set -- do nothing
