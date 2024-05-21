@@ -7,7 +7,8 @@ from typing import Dict, List, Tuple
 FROM_CONFIG = '_from_config_'
 
 _base_config = {
-
+    'version': 2.0,
+    
     'data.sanity_mode': 'none',
     'data.target_col': 'readmitted',
     'data.diagnosis_cols': ['diag_1', 'diag_2', 'diag_3'],

@@ -27,7 +27,7 @@ config_grid = {
     'cv.base.searcher': ['GridSearchCV'],
     'cv.fine.searcher': ['OptimSearchCV', 'RandomizedSearchCV'],
     'balance.method': ['none', 'SMOTENC', 'NearMiss', 'InstanceHardnessThreshold'],
-    'random_state': [1337]
+    'random_state': list(range(10))
 }
 
 # -------
@@ -40,7 +40,9 @@ balance_params_grid = {
     'RandomUnderSampler': {
         'random_state': [FROM_CONFIG],
     },
-    'SDV': {
+    'SDVGauss': {
+    },
+    'SDVGAN': {
     },
     'SMOTENC': {
         'random_state': [FROM_CONFIG],
@@ -63,7 +65,7 @@ balance_params_grid = {
 # params grid for each estimator
 
 _common_base_grid = {
-    'max_depth': np.arange(2, 15),
+    'max_depth': np.arange(2, 10),
     'learning_rate': [5e-05, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
     'n_estimators': [50, 100, 200, 500]
 }
