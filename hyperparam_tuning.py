@@ -140,13 +140,19 @@ estimator_params_grids = {
 # Search funcs:
 
 
-def cv_search(fine_tune: bool, skip_existing: bool = True):
+def cv_search(fine_tune: bool, skip_existing: bool = True, ests: List[str] = None):
     """ Entry point for cv search. Iterates over the configurations defined by the grids,
         and cv-searches best estimator params for each configuration.
     """
+    if ests is not None:
+        ests = [_est_shortname(est) for est in ests]
+        assert set(ests).issubset([_est_shortname(est) for est in config_grid['estimator']])
+
     base_config = get_base_config()
     base_config['fine_tune'] = fine_tune
     for config in yield_from_grid(grid_dict=config_grid, default_dict=base_config):
+        if ests is not None and _est_shortname(config['estimator']) not in ests:
+            continue
         for balance_params in yield_from_grid(balance_params_grid[config['balance.method']]):
             config['balance.params'] = inherit_from_config(balance_params, config)
             cv_search_estimator_params(config, skip_existing)
@@ -267,7 +273,17 @@ def _reduce_grid(grid: Dict) -> Dict:
     return {k: [v[0], v[-1]] if len(v) > 1 else v for k, v in grid.items()}
 
 
+def _est_shortname(fullname: str) -> str:
+    return fullname.lower().replace('classifier', '')
+
+
 # ---------------------------------------
 
 if __name__ == "__main__":
-    cv_search(fine_tune=True)
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument("-e", "--ests")
+    parser.add_argument("--no-finetune", action="store_false", dest="fine_tune", default=True)
+    args = parser.parse_args()
+    ests = [s.strip() for s in args.ests.split(",")] if args.ests else None
+    cv_search(fine_tune=args.fine_tune, ests=ests)
