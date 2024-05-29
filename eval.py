@@ -1,6 +1,8 @@
 import json
 import numpy as np
 from typing import  Dict
+
+import paths
 from data import load_data, build_data_prep_pipe, build_cv_pipe, stratified_split
 from sklearn.base import BaseEstimator
 from sklearn.metrics import roc_auc_score, f1_score, balanced_accuracy_score, roc_curve
@@ -26,7 +28,7 @@ def calc_scores(estimator: BaseEstimator, X: np.ndarray, y_true: np.ndarray):
 def plot_roc_curve(scores: Dict):
     plt.plot([0, 1], [0, 1], 'k--')
     for name, scores in scores.items():
-        s = ', '.join([f'{k}={v:2.2f}' for k, v in scores.items() if k not in ('fpr', 'tpr')])
+        s = ', '.join([f'{k}={v:2.4f}' for k, v in scores.items() if k not in ('fpr', 'tpr')])
         plt.plot(scores['fpr'], scores['tpr'], '-', label=f"{name.upper()} {s}")
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.05])
@@ -62,7 +64,12 @@ def evaluate_from_config(estimator: BaseEstimator, config: Dict = None, draw: bo
 
 
 if __name__ == "__main__":
-    best_pkl = '/ml-2024/output/cv_results/RandomForest GridSearchCV SMOTENC BASE auc s1337 cf49.best.pkl'
+    def _get_pkl(s):
+        if s.endswith('.pkl'):
+            return s
+        return str(paths.CV_RESULTS_PATH / (s + '.best.pkl'))
+
+    best_pkl = _get_pkl('XGB OptimSearchCV NoBalance TUNED auc s7 87ac')
     df = pd.read_csv(best_pkl.replace('best.pkl', 'csv'))
     config = json.loads(df.iloc[0]['config'])
     items = pickle.load(open(best_pkl, 'rb'))

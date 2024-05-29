@@ -29,17 +29,17 @@ class OptimSearchCV(BaseSearchCV):
            If not: halve the step size and repeat from 2, or return (if step size = 1).
     """
 
-    def __init__(self, estimator, param_grid: Dict, scales: int = 2, visualize: bool = False, **kwargs):
+    def __init__(self, estimator, param_grid: Dict, scales: int = 2, nrand: int = 2, **kwargs):
         """
         param_grid: parameters grid, currently only numeric values are supported
         scales: number of step size halvings. e.g. if scale=3, step sizes are 4 -> 2 -> 1
+        nrand: number of random samples in each iteration
         """
         super().__init__(estimator, **kwargs)
 
         self.grid = Grid(param_grid)
         self.scales = scales
-        self.visualize = visualize
-
+        self.nrand = nrand
         self.visit_log: Dict[Coord, VisitItem] = {}
         self.rounds_log: List[Dict] = []
         self._visited: Dict[Coord, float] = {}
@@ -87,7 +87,7 @@ class OptimSearchCV(BaseSearchCV):
 
     def process_visit_result(self, result: Dict):
         loss_metric, loss_sign, _ = self._loss_metric_spec()
-        losses = loss_sign * result[loss_metric]
+        losses = loss_sign * np.asarray(result[loss_metric])
         params_list = result['params']
         for i, (params, loss) in enumerate(zip(params_list, losses)):
             coord = self.grid.dict2coord(params)
@@ -131,6 +131,15 @@ class OptimSearchCV(BaseSearchCV):
             # gradient from center points to coord, est_loss = estimated loss at coord
             if est_loss < self.best_loss and coord not in self.visited:
                 _add_visit([coord], reason=f"explore:loss={est_loss:2.4f}", src=center)
+
+        # Random additional visits
+        if self.get_queue() and self.nrand:
+            visit_inds = self.grid.coords2inds(list(self.visited) + self.get_queue())
+            non_visited = set(range(self.grid.total_size)).difference(visit_inds)
+            n_additionals = min(len(non_visited), self.nrand)
+            if n_additionals:
+                rand_visit_inds = np.random.default_rng(len(self.rounds_log)).choice(list(non_visited), n_additionals)
+                _add_visit(self.grid.inds2coords(rand_visit_inds), reason="rand")
 
         if not self.get_queue() and self.step_size > 1:
             # converged (no visits were added) -> halve step size
@@ -180,65 +189,13 @@ class OptimSearchCV(BaseSearchCV):
             if item.round != prev_round:
                 prev_round = item.round
                 print(f"Round {item.round} (Step size {self.rounds_log[item.round]['step_size']}):")
-            s = {'round': item.round,
-                 'reason': item.reason,
-                 'src': str(item.src) if item.src else "",
-                 'msg': f"-> {item.msg}" if item.msg else "",
+            s = {'round': item.round, 'reason': item.reason, 'src': str(item.src) if item.src else "",
+                 'msg': f"-> {item.msg}" if item.msg else "", 'coord': coord,
                  'loss': round(self.visited[coord], 4) if coord in self.visited else "<pending>",
-                 'roc_auc': round(item.scores['roc_auc'], 4) if coord in self.visited else "<pending>",
-                 'coord': coord}
+                 'roc_auc': round(item.scores['roc_auc'], 4) if coord in self.visited else "<pending>"}
             print("{coord} round:{round}, reason:{reason}{src} roc_auc={roc_auc} loss={loss} {msg}".format(**s))
 
-    def visualize_visits(self, latest_only: bool):
-        import matplotlib.pyplot as plt
-        from matplotlib import colormaps
-
-        def _draw(coords):
-
-            colors = colormaps['terrain'](np.linspace(0, .5, 10))
-            loss_cmap = colormaps['hot']
-            loss_cmap.set_bad(color='blue')
-
-            assert self.grid.ndim == 2
-
-            loss_image = np.zeros(self.grid.shape[::-1], float) + np.nan
-            for coord in coords:
-                loss_image[coord[::-1]] = self.visited[coord]
-
-            plt.figure()
-            plt.imshow(loss_image, cmap=loss_cmap)
-            plt.colorbar()
-
-            ax_names = self.grid.ax_names
-
-            ax = self.grid.grid[ax_names[0]]
-            plt.xticks(ticks=np.arange(len(ax)), labels=ax)
-            plt.xlabel(ax_names[0])
-
-            ax = self.grid.grid[ax_names[1]]
-            plt.yticks(ticks=np.arange(len(ax)), labels=ax)
-            plt.ylabel(ax_names[1])
-
-            for coord in coords:
-                item = self.visit_log[coord]
-                txt = str(item.round) + ('*' if item.msg == 'NewBest' else '')
-                plt.text(coord[0], coord[1], txt, color=colors[(item.round - 1) % len(colors)])
-
-        _, _, loss_name = self._loss_metric_spec()
-        rounds_to_draw = [len(self.rounds_log) - 1] if latest_only else range(len(self.rounds_log))
-        for visit_round in rounds_to_draw:
-            coords = [coord for coord in self.visited if self.visit_log[coord].round <= visit_round]
-            _draw(coords)
-            plt.suptitle(f"Sampled loss values [{loss_name}]")
-            if coords:
-                best_coord = min(coords, key=lambda coord: self.visited[coord])
-                best_params = self.grid.coord2dict(best_coord)
-                plt.title(f"Round {visit_round}, Best: {best_coord} : {best_params}")
-            else:
-                plt.title(f"Round {visit_round}, [no visits]")
-
     def _run_search(self, evaluate_candidates):
-
         while True:
             candidates = self.get_candidates()
             if not candidates:
@@ -247,8 +204,66 @@ class OptimSearchCV(BaseSearchCV):
             result = evaluate_candidates(ParameterGrid(candidates))
             self.process_visit_result(result)
             self.tell_visits_history()
-            if self.visualize:
-                self.visualize_visits(latest_only=True)
-                plt.show()
-
         print("DONE")
+
+
+def _show_synthetic_example():
+    from xgboost import XGBClassifier
+
+    # make synthetic loss landscape
+    param_grid = {'max_depth': np.arange(1, 31), 'learning_rate': np.arange(2, 39)}
+    estimator = XGBClassifier(random_state=1)
+    cv = OptimSearchCV(estimator, param_grid=param_grid, refit='neg_log_loss', scales=3, nrand=0)
+    h, w = cv.grid.shape
+    xx, yy = np.meshgrid(range(w), range(h))
+    optimal_xy = w // 4, h // 2
+    gt_loss = np.sqrt((xx - optimal_xy[0]) ** 2 + (yy - optimal_xy[1]) ** 2)
+
+    # run search
+    while True:
+        cands = cv.get_candidates()
+        if not cands:
+            break
+        result = {'params': cands, 'mean_test_neg_log_loss': [gt_loss[cv.grid.dict2coord(cand)] for cand in cands]}
+        cv.process_visit_result(result)
+
+    # draw iterations
+    curr_kws = {'color': 'limeGreen', 's': 50}
+    past_kws = {'color': 'gray', 's': 48, 'alpha': .8}
+    best_kws = {**curr_kws, 'edgecolors': 'Gold', 'lw': 2}
+
+    rounds_to_draw = range(len(cv.rounds_log) - 1)
+    pts = np.array([coord[::-1] for coord in cv.visit_log])
+    is_rand_visit = np.array([cv.visit_log[coord].reason == "rand" for coord in cv.visit_log])
+    visit_rounds = np.array([cv.visit_log[coord].round for coord in cv.visit_log])
+
+    best_coord_per_round = []
+    for visit_round in rounds_to_draw:
+        best = [coord for coord in cv.visited
+                if cv.visit_log[coord].round == visit_round and cv.visit_log[coord].msg == 'NewBest']
+        best_coord_per_round.append(best[0] if len(best) else best_coord_per_round[-1])
+    best_loss_per_round = [cv.visited[coord] for coord in best_coord_per_round]
+
+    for visit_round in rounds_to_draw:
+        plt.figure()
+        plt.imshow(gt_loss, cmap='hot')
+        plt.title(f"Iter {visit_round}, StepSize={cv.rounds_log[visit_round]['step_size']}")
+        ii = visit_rounds < visit_round
+        if np.any(ii):
+            plt.scatter(*pts[ii].T, color='gray', alpha=.8, s=48)
+        ii = visit_rounds == visit_round
+        if np.any(ii):
+            plt.scatter(*pts[ii].T, **curr_kws)
+            plt.scatter(best_coord_per_round[visit_round][1], best_coord_per_round[visit_round][0], **best_kws)
+            plt.scatter(*pts[ii & is_rand_visit].T, color='k', marker='.')
+
+    plt.figure()
+    plt.plot(best_loss_per_round, 'dodgerBlue')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.title('Loss vs optimization progress')
+    plt.show()
+
+
+if __name__ == "__main__":
+    _show_synthetic_example()

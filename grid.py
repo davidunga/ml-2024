@@ -97,7 +97,10 @@ class Grid:
         tol = 100 * np.finfo(float).eps
 
         def _index(arr, val) -> int:
-            return int(np.argmax(np.abs(arr - val) < tol))
+            if np.issubdtype(arr.dtype, np.number):
+                return int(np.argmax(np.abs(arr - val) < tol))
+            else:
+                return int(np.argmax(arr == val))
 
         return tuple(_index(ax, d[name]) for name, ax in self.grid.items())
 
